@@ -462,6 +462,73 @@ function drawMessageCanvas(canvas,title,sub,bg="#fff7d6"){
   ctx.font="bold 54px sans-serif";ctx.fillText(title,300,225);ctx.fillStyle="#666";ctx.font="22px sans-serif";ctx.fillText(sub,300,290);
 }
 
+
+/* v2.5b: PRIMER安全フォールバック
+   帯文字テンプレートが曖昧でも、
+   ・写真が十分明るい
+   ・黄土色帯が見つかる
+   ・通常インクのC/M/Y色マスが見つからない
+   を全部満たす時だけPRIMER候補にする。 */
+function halfImageQuality(imgData,x0,x1){
+  const W=imgData.width,H=imgData.height,d=imgData.data;
+  const xa=Math.floor(x0+(x1-x0)*.07);
+  const xb=Math.floor(x0+(x1-x0)*.93);
+  const ya=Math.floor(H*.18);
+  const yb=Math.floor(H*.84);
+
+  let sum=0,n=0,bright=0,dark=0,edges=0;
+  for(let y=ya;y<yb;y+=3){
+    for(let x=xa;x<xb;x+=3){
+      const i=(y*W+x)*4;
+      const lum=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+      sum+=lum;n++;
+      if(lum>=155)bright++;
+      if(lum<55)dark++;
+
+      if(x+3<xb){
+        const j=(y*W+(x+3))*4;
+        const lum2=.299*d[j]+.587*d[j+1]+.114*d[j+2];
+        if(Math.abs(lum-lum2)>32)edges++;
+      }
+    }
+  }
+
+  return {
+    mean:sum/Math.max(1,n),
+    brightRatio:bright/Math.max(1,n),
+    darkRatio:dark/Math.max(1,n),
+    edgeRatio:edges/Math.max(1,n)
+  };
+}
+
+function halfTableColorCount(C,M,Y,x0,x1,H){
+  const ya=H*.42,yb=H*.86;
+  return [...C,...M,...Y].filter(c =>
+    c.cx>=x0 && c.cx<x1 &&
+    c.cy>=ya && c.cy<=yb
+  ).length;
+}
+
+function safePrimerFallback(imgData,bandResult,C,M,Y,x0,x1){
+  const q=halfImageQuality(imgData,x0,x1);
+  const colorCount=halfTableColorCount(C,M,Y,x0,x1,imgData.height);
+  const bandFound=!!bandResult.band;
+
+  // intentionally conservative
+  const goodImage =
+    q.mean>=138 &&
+    q.brightRatio>=.30 &&
+    q.darkRatio<=.38 &&
+    q.edgeRatio>=.025;
+
+  const isPrimer =
+    bandFound &&
+    goodImage &&
+    colorCount===0;
+
+  return {isPrimer,q,colorCount,bandFound};
+}
+
 async function analyze(){
   $("left").textContent="-";$("right").textContent="-";$("leftScore").textContent="";$("rightScore").textContent="";
   setProgress(5);setStatus("2本を確認しています…","info");await sleep(20);
@@ -474,6 +541,9 @@ async function analyze(){
   const tR=detectTable(compsC,compsM,compsY,mid,photo.width,photo.height);
   const bandL=classifyBandText(img,0,mid);
   const bandR=classifyBandText(img,mid,photo.width);
+
+  const primerFallbackL=safePrimerFallback(img,bandL,compsC,compsM,compsY,0,mid);
+  const primerFallbackR=safePrimerFallback(img,bandR,compsC,compsM,compsY,mid,photo.width);
 
   // 2本が同一位置に重なっていないか最低限チェック
   const centers=[];
@@ -489,7 +559,7 @@ async function analyze(){
 
   setProgress(35);setStatus("色・PRIMERを判定中…","info");await sleep(20);
 
-  async function one(t,band,canvas){
+  async function one(t,band,fallback,canvas){
     // 表が見つかったなら通常インクを最優先
     if(t){
       const raw=document.createElement("canvas");
@@ -512,12 +582,31 @@ async function analyze(){
       return{name:null,uncertain:true,reason:"LH-100候補 / 表未検出"};
     }
 
+    // テンプレートが曖昧でも、安全条件を全部満たす場合だけPRIMER。
+    if(fallback.isPrimer){
+      drawMessageCanvas(
+        canvas,
+        "PRIMER",
+        `表なし / 帯あり / 色マスなし  明るさ=${fallback.q.mean.toFixed(0)}`,
+        "#eef7ff"
+      );
+      return{
+        name:"PRIMER",
+        primer:true,
+        reason:`表なし+帯あり+色マスなし / 明るさ ${fallback.q.mean.toFixed(0)}`
+      };
+    }
+
     drawMessageCanvas(canvas,"要確認","表もPR-200も確定できません");
-    return{name:null,uncertain:true,reason:`帯文字曖昧 LH=${band.lh.toFixed(2)} PR=${band.pr.toFixed(2)}`};
+    return{
+      name:null,
+      uncertain:true,
+      reason:`帯文字曖昧 LH=${band.lh.toFixed(2)} PR=${band.pr.toFixed(2)} / 色マス=${fallback.colorCount} / 明るさ=${fallback.q.mean.toFixed(0)}`
+    };
   }
 
-  const rL=await one(tL,bandL,normL);
-  const rR=await one(tR,bandR,normR);
+  const rL=await one(tL,bandL,primerFallbackL,normL);
+  const rR=await one(tR,bandR,primerFallbackR,normR);
 
   $("left").textContent=rL.name||"?";$("right").textContent=rR.name||"?";
   $("leftScore").textContent=rL.primer?rL.reason:rL.uncertain?rL.reason:confidenceText(rL);
