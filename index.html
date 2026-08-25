@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>インクチェック判定 v2.9</title>
+<title>インクチェック判定 v2.9D</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f3f4f6;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -86,12 +86,20 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
   }
 }
 
+
+.diag{
+  background:#111;color:#fff;border-radius:14px;padding:12px;margin-top:10px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:13px;line-height:1.65;white-space:pre-wrap;word-break:break-word
+}
+.diag b{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>インクチェック判定</h1>
-<div class="sub">v2.9 / タブレット表示縮小 / 左右個別拡大 / 斜め四角チェック</div>
+<div class="sub">v2.9D / 端末差 診断版</div>
 
 <div class="card">
   <button id="startCamera" class="btn primary" type="button">カメラを起動</button>
@@ -159,6 +167,13 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
     <div class="box">右<div id="right" class="name">-</div><div id="rightScore" class="small"></div></div>
   </div>
   <div id="status" class="status">カメラを起動してください</div>
+</div>
+
+
+<div class="card">
+  <b>端末・カメラ診断</b>
+  <div class="small">iPhoneとAndroidタブレットで同じ2本を撮影し、この欄が見えるスクショを送ってください。</div>
+  <div id="diag" class="diag">まだ撮影していません</div>
 </div>
 
 <div class="card">
