@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>インクチェック判定 v2.6</title>
+<title>インクチェック判定 v2.7</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f3f4f6;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -55,6 +55,13 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 .labelText{position:absolute;left:0;right:0;bottom:-21px;color:rgba(255,255,255,.82);font-size:9px;text-align:center;font-weight:800;text-shadow:0 1px 2px #000}
 .scaleNote{position:absolute;left:0;right:0;bottom:1.5%;text-align:center;color:rgba(255,255,255,.76);font-size:10px;font-weight:700;text-shadow:0 1px 3px #000}
 
+
+.captureFlash{position:absolute;inset:0;background:white;opacity:0;pointer-events:none;transition:opacity .18s;z-index:8}
+.captureFlash.on{opacity:.82}
+.captureState{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9;background:rgba(0,0,0,.78);color:#fff;border-radius:999px;padding:12px 18px;font-size:18px;font-weight:900;display:none;white-space:nowrap}
+.captureState.on{display:block}
+#retake{display:none}
+#retake.show{display:block}
 #photo{display:none;width:100%;height:auto;border-radius:12px;margin-top:10px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .results{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -72,7 +79,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 <body>
 <div class="wrap">
 <h1>インクチェック判定</h1>
-<div class="sub">v2.6 / 2本同時撮影 / 曲面補正チェック / PR-200 OCR補助</div>
+<div class="sub">v2.7 / 2本同時撮影 / PRIMER強化 / 撮影静止</div>
 
 <div class="card">
   <button id="startCamera" class="btn primary" type="button">カメラを起動</button>
@@ -82,7 +89,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
     <div id="cameraPlaceholder">GitHub Pagesで開いて<br>「カメラを起動」を押してください</div>
 
     <div class="guideLayer">
-      <div class="guideText">左右に別々のボトルを1本ずつ入れ、白ラベル全体が見えるようにしてください</div>
+      <div class="guideText">左右に別々のボトルを1本ずつ。枠は目安なので、だいたい入っていればOK</div>
       <div class="midLine"></div>
 
       <div class="bottle left">
@@ -95,7 +102,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
             <div>Y</div><div></div><div>LC</div><div></div>
             <div>K</div><div></div><div>LM</div><div></div>
           </div>
-          <div class="labelText">白ラベルをこの枠内へ</div>
+          <div class="labelText">白ラベルはこの辺りへ</div>
         </div>
       </div>
 
@@ -109,12 +116,14 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
             <div>Y</div><div></div><div>LC</div><div></div>
             <div>K</div><div></div><div>LM</div><div></div>
           </div>
-          <div class="labelText">白ラベルをこの枠内へ</div>
+          <div class="labelText">白ラベルはこの辺りへ</div>
         </div>
       </div>
 
-      <div class="scaleNote">チェック表の実寸比目安＝ボトル幅100mmに対して約35mm（帯は縦幅を縮小）</div>
+      <div class="scaleNote">ガイドは目安です。多少のズレ・傾きは自動補正します</div>
     </div>
+    <div id="captureFlash" class="captureFlash"></div>
+    <div id="captureState" class="captureState">撮影しました・判定中…</div>
   </div>
 
   <button id="capture" class="btn primary" type="button" disabled>この状態で撮影・判定</button>
@@ -122,6 +131,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
     <label class="btn secondary" for="file">既存写真で判定</label>
     <button id="stopCamera" class="btn secondary" type="button" disabled>カメラ停止</button>
   </div>
+  <button id="retake" class="btn secondary" type="button">撮り直す</button>
   <input id="file" type="file" accept="image/*">
 
   <canvas id="photo"></canvas>
@@ -152,7 +162,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 
 <div class="card small">
 <b>PRIMERの扱い</b><br>
-通常インクはチェック表から判定します。チェック表は行ごとに少し位置がずれていても拾えるようにし、チェック形状も斜線優先で見ます。<br>表が見つからない場合は黄土色帯を見つけ、まずブラウザ内テンプレート比較、必要時はOCRで「PR-200 / LH-100」を補助判定します。暗い・不鮮明な場合はPRIMERに断定せず「要確認」で止めます。<br><br>画像は外部AIへ送信しません。判定はブラウザ内で行います。OCRライブラリの読込にはネット接続が必要です。
+通常インクは今まで通りチェック表から判定します。撮影ガイドは目安で、多少ズレても左右それぞれを広く探します。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。
 </div>
 </div>
 <script src="app.js"></script>
