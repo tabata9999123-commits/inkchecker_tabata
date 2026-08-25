@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>インクチェック判定 v2.7</title>
+<title>インクチェック判定 v2.8</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f3f4f6;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -79,7 +79,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 <body>
 <div class="wrap">
 <h1>インクチェック判定</h1>
-<div class="sub">v2.7 / 2本同時撮影 / PRIMER強化 / 撮影静止</div>
+<div class="sub">v2.8 / 2本同時撮影 / 端末差を減らす固定サイズ解析 / 表示簡略化</div>
 
 <div class="card">
   <button id="startCamera" class="btn primary" type="button">カメラを起動</button>
@@ -162,7 +162,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 
 <div class="card small">
 <b>PRIMERの扱い</b><br>
-通常インクは今まで通りチェック表から判定します。撮影ガイドは目安で、多少ズレても左右それぞれを広く探します。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。
+通常インクは今まで通りチェック表から判定します。撮影ガイドは目安で、多少ズレても左右それぞれを広く探します。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は端末差を減らすため、解析前に共通の 900×1200 サイズへ正規化します。
 </div>
 </div>
 <script src="app.js"></script>
