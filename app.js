@@ -765,6 +765,127 @@ function classifyRectified(canvas,rectInfo){
   };
 }
 
+
+function medianNumber(vals){
+  const a=vals.filter(v=>Number.isFinite(v)).sort((x,y)=>x-y);
+  if(!a.length)return null;
+  return a[(a.length/2)|0];
+}
+function rectangleQuad(x0,x1,y0,y1){
+  return [
+    {x:x0,y:y0},{x:x1,y:y0},
+    {x:x1,y:y1},{x:x0,y:y1}
+  ];
+}
+function classifyByColorRows(canvas){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const {g,W,H}=grayscale(canvas);
+
+  // Only C/M/Y are used as strong anchors. K row is extrapolated one pitch lower.
+  const cRg=rowColorRange(canvas,"C",30,130,235);
+  const mRg=rowColorRange(canvas,"M",130,230,235);
+  const yRg=rowColorRange(canvas,"Y",230,330,235);
+  const good=[cRg,mRg,yRg].filter(Boolean);
+  if(good.length<2)return null;
+
+  const colorLeft=medianNumber(good.map(r=>r[0]));
+  const colorRight=medianNumber(good.map(r=>r[1]));
+  if(colorLeft==null||colorRight==null||colorRight-colorLeft<20)return null;
+
+  // After normalizeTable, row pitch is approximately 100 px.
+  // We deliberately do NOT use faint grid lines for these row zones.
+  const rowCenters=[80,180,280,380];
+  const rowHalf=47;
+
+  // Left check column is directly to the right of C/M/Y/K.
+  // Wide enough to tolerate perspective/compression, but stops before W/CL/LC/LM text.
+  const leftX0=colorRight+3;
+  const leftX1=Math.min(W-5,colorRight+112);
+
+  // LC / LM background is optional. If found, use its right edge only to locate
+  // the right check strip. Failure here does NOT abort recognition.
+  const lcRg=rowRightLabelRange(canvas,"LCBG",230,330,colorRight+60,Math.min(W,colorRight+310));
+  const lmRg=rowRightLabelRange(canvas,"LMBG",330,430,colorRight+60,Math.min(W,colorRight+310));
+  const labelRight=medianNumber([lcRg?.[1],lmRg?.[1]]);
+
+  let rightX0,rightX1;
+  if(labelRight!=null){
+    rightX0=labelRight+3;
+    rightX1=Math.min(W-5,labelRight+122);
+  }else{
+    // Physical table proportions observed from the real labels:
+    // color cell -> left check -> W/CL/LC/LM -> right check.
+    rightX0=colorRight+178;
+    rightX1=Math.min(W-5,colorRight+315);
+  }
+
+  if(leftX1-leftX0<35||rightX1-rightX0<35)return null;
+
+  const vals=[];
+  for(let r=0;r<4;r++){
+    const y0=Math.max(10,rowCenters[r]-rowHalf);
+    const y1=Math.min(H-10,rowCenters[r]+rowHalf);
+
+    const qL=rectangleQuad(leftX0,leftX1,y0,y1);
+    const qR=rectangleQuad(rightX0,rightX1,y0,y1);
+
+    vals.push({name:NAMES_L[r],row:r,side:"L",quad:qL,...scoreQuad(g,W,H,qL)});
+    vals.push({name:NAMES_R[r],row:r,side:"R",quad:qR,...scoreQuad(g,W,H,qR)});
+  }
+
+  vals.sort((a,b)=>b.score-a.score);
+  const best=vals[0],second=vals[1],gap=best.score-second.score;
+
+  // This path is intentionally based on mark position + diagonal shape,
+  // not on exact box boundaries.
+  const shapeOk=(best.diag>.12)||(best.areaR>.014&&best.axis<.58);
+  const accepted=
+    best.areaR>.0045 &&
+    best.score>.026 &&
+    (gap>.0065 || best.score>second.score*1.18) &&
+    shapeOk;
+
+  ctx.save();
+
+  // Blue: color anchors / optional LC-LM label column.
+  ctx.lineWidth=3;
+  ctx.strokeStyle="#2563eb";
+  ctx.strokeRect(colorLeft,32,colorRight-colorLeft,396);
+  if(lcRg)ctx.strokeRect(lcRg[0],232,lcRg[1]-lcRg[0],96);
+  if(lmRg)ctx.strokeRect(lmRg[0],332,lmRg[1]-lmRg[0],96);
+
+  // Green: broad search strips. These are NOT grid boxes.
+  ctx.strokeStyle="#16a34a";
+  for(let r=0;r<4;r++){
+    const y0=rowCenters[r]-rowHalf,y1=rowCenters[r]+rowHalf;
+    ctx.strokeRect(leftX0,y0,leftX1-leftX0,y1-y0);
+    ctx.strokeRect(rightX0,y0,rightX1-rightX0,y1-y0);
+  }
+
+  // Red/orange: selected row + side.
+  const bx0=best.side==="L"?leftX0:rightX0;
+  const bx1=best.side==="L"?leftX1:rightX1;
+  ctx.lineWidth=7;
+  ctx.strokeStyle=accepted?"#e00000":"#f59e0b";
+  ctx.strokeRect(
+    bx0+6,
+    rowCenters[best.row]-rowHalf+6,
+    bx1-bx0-12,
+    rowHalf*2-12
+  );
+  ctx.restore();
+
+  return {
+    name:accepted?best.name:null,
+    best,second,gap,vals,
+    rowBased:true,
+    colorLeft,colorRight,
+    leftZone:[leftX0,leftX1],
+    rightZone:[rightX0,rightX1],
+    labelRight
+  };
+}
+
 function classifyNormalized(canvas){
   const ctx=canvas.getContext("2d",{willReadFrequently:true}),{g,W,H}=grayscale(canvas),geo=detectLabelGeometry(canvas);
   if(!geo)return{name:null,best:{name:"?",score:0,areaR:0},second:{name:"?",score:0,areaR:0},gap:0,vals:[],labelGeometry:null,rowGeometry:null};
@@ -1052,19 +1173,25 @@ async function analyze(){
       const sheared=document.createElement("canvas");
       shearCanvas(raw,k,sheared);
 
-      // New main path: unroll the cylindrical label using strong colored anchors.
-      const rectInfo=cylindricalRectify(sheared,canvas);
-      if(rectInfo){
-        const r=classifyRectified(canvas,rectInfo);
-        r.shear=k;r.mode=t.mode;r.band=band;r.ocr=null;r.rectifyMode="cylinder";
-        return r;
-      }
-
-      // Safe fallback: keep the previous v2.9 path if the anchors are not reliable.
+      // v3.1 main path:
+      // Ignore faint grid lines. C/M/Y/K define the rows; check marks are
+      // searched inside two broad vertical strips and assigned to the nearest row.
       canvas.width=sheared.width;canvas.height=sheared.height;
       canvas.getContext("2d",{willReadFrequently:true}).drawImage(sheared,0,0);
+
+      const rowResult=classifyByColorRows(canvas);
+      if(rowResult){
+        rowResult.shear=k;
+        rowResult.mode=t.mode;
+        rowResult.band=band;
+        rowResult.ocr=null;
+        rowResult.rectifyMode="color-row";
+        return rowResult;
+      }
+
+      // Fallback only if the strong color anchors themselves cannot be established.
       const r=classifyNormalized(canvas);
-      r.shear=k;r.mode=t.mode;r.band=band;r.ocr=null;r.rectifyMode="fallback";
+      r.shear=k;r.mode=t.mode;r.band=band;r.ocr=null;r.rectifyMode="legacy";
       return r;
     }
 
@@ -1102,7 +1229,7 @@ async function analyze(){
 
   const desc=r=>r.primer||r.uncertain
     ?`${r.name||"要確認"} / ${r.reason}${r.ocr?` / OCR=${(r.ocr.text||"-").replace(/\s+/g," ")}`:""}`
-    :`${r.best.name} / 2位=${r.second.name} / 補正=${r.rectifyMode||"-"} / 斜線=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
+    :`${r.best.name} / 2位=${r.second.name} / 方式=${r.rectifyMode||"-"} / 斜線=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
   $("debugText").textContent=`左: ${desc(rL)}　右: ${desc(rR)}`;
 
   setProgress(100);
