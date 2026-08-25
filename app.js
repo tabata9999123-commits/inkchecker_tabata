@@ -12,6 +12,7 @@ const LH_TEMPLATE="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAABQCAAAAAA
 const PR_TEMPLATE="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAABQCAAAAAACIqegAAAFbElEQVR4AeXBC5JbORIEwYj7HzpHbBQK4OeBzR0b00rtLj+M/DDyw8gPIz+M/DDylwkbeSJ/mbCRJ/JXCQ/kgfwxQpEr4Ynckz9DuCOvhBfkjvx+YZAr4ZE8CRdkI79fGORKeCRPwgXZyG8V7skr4Zk8CFdkI79TeCKPwktyL1ySRX6b8JLcC1dkExaBsMgi/7PwgnxXuCK7cEU2oclNWKTJx8KRfEu4Jku4Ji00GUKTJh8LR/It4Zos4Zq00GQITZos4RW5E96R7wjXZAlNfgmLtFCkhUmalHBJNuE9eSucSAuTfAlNWijSwiRNSjiRKXyDvBMWuQmLTKHJEJqUMEkLTSYp4UhK+A55IzQZQpMpFJlCkxImaaHJJCUcSQnfIWdhkhaaDGGSFiYpYZIWmkxSwpGU8B1yFiZpockQJmlhkhImaaHJJC2cyBC+Q85CkSU0GcIkLUxSwiSbUGSSFk5kCE3uhI0chSJLaDKESVpoMoRJNqHIJC0cSQmDPAiLHIUiS2gyhElaaDKEIrtQZJIWBmlhkRIGeRSaHIUiS2gyhCJLaHITmiyhySQtDNLCIiUM8ig0OQpFltBkCEWW0OQmNFlCk0laGGQJTUoY5FFo8rnQZAhFltDkJjTZhSKTtDDILhQpYZBnocjnQpOb0GQJTW5Ck10oMkkLg9wJg5QwyLNQ5HNhki+hyRKa3IQmu1BkkhYGuROKDGGQZ6HIx0KTL6HJEprchCa7MEmRFga5E4oMYZBHocnHQpMvockSmtyEJrswSZEWBrkTigxhkEehycdCky+hyRKa3IQmuzBJkRYGuROKDGGQR6HJp8IiX0KTJTS5CU12YZIiLQxyJxQZwiCPwiQfC02G0GQXityEJrswSZEWBrkTigxhkHthkU+FRYbQZAlNbkKTXSgySQuD7EKREgZp4YF8KCxSQpMlNLkJTXahyCQtDLILRUp4Sz4TFmmhyRKaDKHILhSZpIVBdqFICW/JZ8IiLTRZQpMhFNmFIpO0MEgLi5TwjnwmbKSFJrtQZAhFdqHIJC0UCc+khDP5UNjIEprsQpEhFNmFIpO0cCJTOJIPhY1sQpNdKDKEIrtQZJIWTmQKJ/KpsJFNaLILRYZQZAlNJmnhRKZwIp8KG9mEJrtQZAhFltBkkhYOpIVr8qmwk11YZBOKDKHIEppM0sI1WcIV+VjYyYMwSQtNhjBJC5M0aeGK7EKRm7CTj4SNPAmTtNBkCJO0MEmTFi7InVCkhEU+EDbyLEzSwiQlTDKFJk2W8Io8CEWmsMi3hY28ECZpYZIpFJlCkyZLeEUehCJTWOTbwkZeCJO0MMkUikyhSZMlDHIUikxhkW8Li7wSJmlhkik0GcIkiyzhi5yFIi0s8j1hIy+FRYbQZApNvoQmiyzhi5yFIpuwyDeERa6EJkNo0kKTX0KTjSzhi5yFIpuwkffCIlfCIjehyRIuyUaWMMhRKLILi7wVFrkUFvklLLKEC3JHljDIUSiyC4u8FRa5FBb5JSyyhAtyR5YwyFEosgsbeSecyBQuyS68JPdkCYMchSJ3wiJvhCOZwiW5E16Re7KEQY5CkTthI2fhSFp4TZ6ER/JIljDIUShyLyxyFM5kCa/IC+GePJElDHIUitwLixyFM1nCK/JCuCdPZAmDHIUiD8IiJ+FMduGJvBYWeUGWMMhRKPIgLHISzuROeCAnkUuyhEGOQpEnYZFr4R3ZhY38C7KEQc7CIE/CIlfCO/Is3Mi/I0sY5CgUeRYWuRAuyX9MljDIUSjyLCxyIVyS/5gsYZCzMMgLocmlgPwWsoRBzsIgL4Qm/4dkCYOchS/yJ5JN5K8nP4z8MPLDyA8jP4z8MP8A/CayYHDbmTcAAAAASUVORK5CYII=";
 let templateLH=null,templatePR=null;
 let tesseractPromise=null;
+let ocrWorkerPromise=null;
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function setProgress(v){bar.style.width=`${clamp(v,0,100)}%`}
@@ -48,6 +49,25 @@ async function ensureTesseract(){
   });
   return tesseractPromise;
 }
+async function getOCRWorker(){
+  if(ocrWorkerPromise)return ocrWorkerPromise;
+  ocrWorkerPromise=(async()=>{
+    const T=await ensureTesseract();
+    if(!T)return null;
+    try{
+      const worker=await T.createWorker("eng");
+      await worker.setParameters({
+        tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789- ",
+        preserve_interword_spaces:"1"
+      });
+      return worker;
+    }catch(e){
+      console.warn("OCR worker init failed",e);
+      return null;
+    }
+  })();
+  return ocrWorkerPromise;
+}
 
 async function startCamera(){
   try{
@@ -59,13 +79,17 @@ async function startCamera(){
     });
     video.srcObject=stream;await video.play();
     $("cameraPlaceholder").style.display="none";
+    $("captureState").classList.remove("on");
+    $("retake").classList.remove("show");
+    captureBtn.textContent="この状態で撮影・判定";
     captureBtn.disabled=false;stopCameraBtn.disabled=false;
-    setStatus("左右に別々のボトルを入れてください","info");
+    setStatus("左右に1本ずつ。枠は目安なので大体でOK","info");
   }catch(e){console.error(e);setStatus("カメラを起動できません："+e.message,"warn")}
 }
 function stopCamera(){
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
   captureBtn.disabled=true;stopCameraBtn.disabled=true;
+  $("retake").classList.remove("show");
 }
 startCameraBtn.onclick=startCamera;stopCameraBtn.onclick=stopCamera;
 
@@ -80,9 +104,44 @@ function drawVisibleVideoToPhoto(){
   pctx.drawImage(video,sx,sy,sw,sh,0,0,outW,outH);
   photo.style.display="block";
 }
+function showCaptureFlash(){
+  const f=$("captureFlash");f.classList.add("on");
+  if(navigator.vibrate)try{navigator.vibrate(35)}catch(_){}
+  setTimeout(()=>f.classList.remove("on"),180);
+}
+async function freezeAfterCapture(){
+  try{video.pause()}catch(_){}
+  showCaptureFlash();
+  $("captureState").textContent="撮影しました・判定中…";
+  $("captureState").classList.add("on");
+  $("retake").classList.add("show");
+  captureBtn.textContent="撮影済み";
+  captureBtn.disabled=true;
+}
+async function resumeForRetake(){
+  $("captureState").classList.remove("on");
+  $("retake").classList.remove("show");
+  photo.style.display="none";
+  captureBtn.textContent="この状態で撮影・判定";
+  if(stream){
+    try{await video.play()}catch(_){}
+    captureBtn.disabled=false;
+    setStatus("左右に1本ずつ。枠は目安なので大体でOK","info");
+  }
+}
+$("retake").onclick=resumeForRetake;
+
 captureBtn.onclick=async()=>{
-  try{drawVisibleVideoToPhoto();$("message").textContent="撮影画像を解析します";await analyze()}
-  catch(e){console.error(e);setStatus("撮影エラー："+e.message,"ng")}
+  try{
+    drawVisibleVideoToPhoto();
+    await freezeAfterCapture();
+    $("message").textContent="撮影済みの画像を解析しています";
+    await analyze();
+    $("captureState").textContent="撮影済み";
+  }catch(e){
+    console.error(e);setStatus("撮影エラー："+e.message,"ng");
+    $("captureState").textContent="撮影済み・エラー";
+  }
 };
 file.addEventListener("change",e=>{
   const f=e.target.files&&e.target.files[0];if(!f)return;
@@ -409,8 +468,8 @@ function drawMessageCanvas(canvas,title,sub,bg="#fff7d6"){
 
 function largestYellowBand(imgData,x0,x1){
   const W=imgData.width,H=imgData.height,d=imgData.data;
-  const xa=Math.floor(x0+(x1-x0)*.04),xb=Math.floor(x0+(x1-x0)*.96);
-  const ya=Math.floor(H*.18),yb=Math.floor(H*.62);
+  const xa=Math.floor(x0+(x1-x0)*.015),xb=Math.floor(x0+(x1-x0)*.985);
+  const ya=Math.floor(H*.12),yb=Math.floor(H*.72);
   const ww=xb-xa,hh=yb-ya,mask=new Uint8Array(ww*hh);
 
   for(let yy=0;yy<hh;yy++)for(let xx=0;xx<ww;xx++){
@@ -431,7 +490,7 @@ function largestYellowBand(imgData,x0,x1){
       for(const np of ns)if(mask[np]&&!seen[np]){seen[np]=1;q[tail++]=np}
     }
     const bw=maxx-minx+1,bh=maxy-miny+1;
-    if(area<ww*hh*.015||bw<ww*.22||bh<hh*.08)continue;
+    if(area<ww*hh*.006||bw<ww*.14||bh<hh*.035)continue;
     const cand={x:xa+minx,y:ya+miny,w:bw,h:bh,area};
     if(!best||area>best.area)best=cand;
   }
@@ -503,60 +562,113 @@ function halfTableColorCount(C,M,Y,x0,x1,H){
 }
 function safePrimerFallback(imgData,bandResult,C,M,Y,x0,x1){
   const q=halfImageQuality(imgData,x0,x1), colorCount=halfTableColorCount(C,M,Y,x0,x1,imgData.height), bandFound=!!bandResult.band;
-  const goodImage=q.mean>=138 && q.brightRatio>=.30 && q.darkRatio<=.38 && q.edgeRatio>=.025;
-  const isPrimer=bandFound && goodImage && colorCount===0;
-  return {isPrimer,q,colorCount,bandFound};
+  const goodImage=q.mean>=128 && q.brightRatio>=.24 && q.darkRatio<=.45 && q.edgeRatio>=.018;
+  const prLean=bandResult.pr>=.24 && bandResult.pr>=bandResult.lh+.015;
+  const isPrimer=bandFound && goodImage && colorCount<=2 && prLean;
+  return {isPrimer,q,colorCount,bandFound,prLean};
 }
 function otsuThreshold(gray){
-  const hist=new Uint32Array(256); for(const v of gray)hist[v]++;
-  const total=gray.length; let sum=0; for(let i=0;i<256;i++)sum+=i*hist[i];
+  const hist=new Uint32Array(256);for(const v of gray)hist[v]++;
+  const total=gray.length;let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];
   let sumB=0,wB=0,varMax=0,thr=128;
   for(let i=0;i<256;i++){
-    wB+=hist[i]; if(!wB)continue;
-    const wF=total-wB; if(!wF)break;
-    sumB+=i*hist[i]; const mB=sumB/wB, mF=(sum-sumB)/wF;
+    wB+=hist[i];if(!wB)continue;
+    const wF=total-wB;if(!wF)break;
+    sumB+=i*hist[i];const mB=sumB/wB,mF=(sum-sumB)/wF;
     const variance=wB*wF*(mB-mF)*(mB-mF);
     if(variance>varMax){varMax=variance;thr=i}
   }
   return thr;
 }
-function prepareBandOCRCanvas(imgData,band){
-  if(!band)return null;
-  const sx=Math.max(0,Math.floor(band.x+band.w*.03)), sy=Math.max(0,Math.floor(band.y-band.h*.05));
-  const sw=Math.min(imgData.width-sx,Math.ceil(band.w*.84)), sh=Math.min(imgData.height-sy,Math.ceil(band.h*1.12));
-  if(sw<20||sh<10)return null;
-  const c=document.createElement("canvas"); c.width=760; c.height=220;
-  const ctx=c.getContext("2d",{willReadFrequently:true});
-  ctx.fillStyle="#fff"; ctx.fillRect(0,0,c.width,c.height);
-  ctx.drawImage(photo,sx,sy,sw,sh,0,0,c.width,c.height);
-  const im=ctx.getImageData(0,0,c.width,c.height), d=im.data, gray=new Uint8Array(c.width*c.height);
+function drawOCRPanel(sheet,sx,sy,sw,sh,dy,mode){
+  const ctx=sheet.getContext("2d",{willReadFrequently:true}),pw=900,ph=190;
+  ctx.fillStyle="#fff";ctx.fillRect(0,dy,pw,ph);
+  ctx.drawImage(photo,sx,sy,sw,sh,15,dy+10,pw-30,ph-20);
+  if(mode==="original")return;
+  const im=ctx.getImageData(0,dy,pw,ph),d=im.data,gray=new Uint8Array(pw*ph);
   for(let i=0,p=0;i<d.length;i+=4,p++)gray[p]=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]);
-  const thr=Math.max(65,Math.min(190,otsuThreshold(gray)));
-  for(let i=0,p=0;i<d.length;i+=4,p++){
-    const v=gray[p]<thr?0:255; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+  if(mode==="gray"){
+    let mn=255,mx=0;for(const v of gray){mn=Math.min(mn,v);mx=Math.max(mx,v)}
+    const span=Math.max(40,mx-mn);
+    for(let i=0,p=0;i<d.length;i+=4,p++){
+      const v=clamp(Math.round((gray[p]-mn)*255/span),0,255);d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;
+    }
+  }else{
+    const thr=Math.max(70,Math.min(190,otsuThreshold(gray)));
+    for(let i=0,p=0;i<d.length;i+=4,p++){
+      const v=gray[p]<thr?0:255;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;
+    }
   }
-  ctx.putImageData(im,0,0);
-  return c;
+  ctx.putImageData(im,0,dy);
+}
+function primerOCRRegions(imgData,band,x0,x1){
+  const W=imgData.width,H=imgData.height,half=x1-x0;
+  if(band){
+    const bx=Math.max(x0,Math.floor(band.x-band.w*.18));
+    const by=Math.max(0,Math.floor(band.y-band.h*.45));
+    const bw=Math.min(x1-bx,Math.ceil(band.w*1.30));
+    const bh=Math.min(H-by,Math.ceil(band.h*1.95));
+    const lx=Math.max(x0,Math.floor(band.x-band.w*.25));
+    const ly=Math.max(0,Math.floor(band.y-band.h*.35));
+    const lw=Math.min(x1-lx,Math.ceil(band.w*1.42));
+    const lh=Math.min(H-ly,Math.ceil(band.h*5.2));
+    return {band:{x:bx,y:by,w:bw,h:bh},label:{x:lx,y:ly,w:lw,h:lh}};
+  }
+  return {
+    band:{x:Math.floor(x0+half*.12),y:Math.floor(H*.16),w:Math.floor(half*.80),h:Math.floor(H*.17)},
+    label:{x:Math.floor(x0+half*.08),y:Math.floor(H*.15),w:Math.floor(half*.84),h:Math.floor(H*.43)}
+  };
+}
+function preparePrimerOCRSheet(imgData,band,x0,x1){
+  const r=primerOCRRegions(imgData,band,x0,x1),sheet=document.createElement("canvas");
+  sheet.width=900;sheet.height=780;
+  const ctx=sheet.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,sheet.width,sheet.height);
+  drawOCRPanel(sheet,r.band.x,r.band.y,r.band.w,r.band.h,0,"original");
+  drawOCRPanel(sheet,r.band.x,r.band.y,r.band.w,r.band.h,195,"binary");
+  drawOCRPanel(sheet,r.label.x,r.label.y,r.label.w,r.label.h,390,"gray");
+  drawOCRPanel(sheet,r.label.x,r.label.y,r.label.w,r.label.h,585,"binary");
+  return sheet;
+}
+function editDistance(a,b){
+  const m=a.length,n=b.length,dp=new Array(n+1);for(let j=0;j<=n;j++)dp[j]=j;
+  for(let i=1;i<=m;i++){
+    let prev=dp[0];dp[0]=i;
+    for(let j=1;j<=n;j++){
+      const tmp=dp[j],cost=a[i-1]===b[j-1]?0:1;
+      dp[j]=Math.min(dp[j]+1,dp[j-1]+1,prev+cost);prev=tmp;
+    }
+  }
+  return dp[n];
+}
+function bestTargetDistance(clean,target){
+  if(clean.includes(target))return 0;
+  let best=99;
+  for(let len=Math.max(2,target.length-1);len<=target.length+1;len++){
+    for(let i=0;i+len<=clean.length;i++)best=Math.min(best,editDistance(clean.slice(i,i+len),target));
+  }
+  return best;
 }
 function parseBandTextType(text){
   const raw=(text||"").toUpperCase();
-  const norm=raw.replace(/[^A-Z0-9-]/g,"").replace(/O/g,"0");
-  if(/PR-?200/.test(norm))return"PR";
-  if(/LH-?100/.test(norm))return"LH";
-  return null;
+  const clean=raw.replace(/[^A-Z0-9]/g,"").replace(/O/g,"0");
+  const dPR=bestTargetDistance(clean,"PR200"),dPrimer=bestTargetDistance(clean,"PRIMER"),dLH=bestTargetDistance(clean,"LH100");
+  if(dPR<=1||dPrimer<=1)return{type:"PR",dPR,dPrimer,dLH,clean};
+  if(dLH<=1)return{type:"LH",dPR,dPrimer,dLH,clean};
+  // Partial evidence: require recognizable PR + 200 pattern, or PRIME stem.
+  if((/PR.{0,2}2.{0,1}00/.test(clean))||clean.includes("PRIME"))return{type:"PR",dPR,dPrimer,dLH,clean};
+  return{type:null,dPR,dPrimer,dLH,clean};
 }
-async function ocrBandType(imgData,band){
-  if(!band)return{type:null,text:"",confidence:0,reason:"帯なし"};
-  const TT=await ensureTesseract();
-  if(!TT)return{type:null,text:"",confidence:0,reason:"OCRライブラリ読込不可"};
-  const c=prepareBandOCRCanvas(imgData,band);
-  if(!c)return{type:null,text:"",confidence:0,reason:"OCR画像作成不可"};
+async function ocrBandType(imgData,band,x0,x1){
+  const worker=await getOCRWorker();
+  if(!worker)return{type:null,text:"",confidence:0,reason:"OCRライブラリ読込不可"};
+  const sheet=preparePrimerOCRSheet(imgData,band,x0,x1);
   try{
-    const res=await TT.recognize(c,"eng",{logger:()=>{}});
-    const text=res?.data?.text||"", type=parseBandTextType(text), confidence=Math.round(res?.data?.confidence||0);
-    return {type,text:text.trim(),confidence,reason:type?`OCR ${type} ${confidence}%`:`OCR曖昧 ${confidence}%`};
+    const res=await worker.recognize(sheet);
+    const text=res?.data?.text||"",confidence=Math.round(res?.data?.confidence||0),parsed=parseBandTextType(text);
+    return {type:parsed.type,text:text.trim(),confidence,parsed,reason:parsed.type?`OCR ${parsed.type} ${confidence}%`:`OCR曖昧 ${confidence}%`};
   }catch(e){
-    return {type:null,text:"",confidence:0,reason:"OCR失敗"};
+    console.warn("OCR failed",e);
+    return{type:null,text:"",confidence:0,reason:"OCR失敗"};
   }
 }
 
@@ -579,7 +691,7 @@ async function analyze(){
 
   setProgress(35);setStatus("色・PRIMERを判定中…","info");await sleep(20);
 
-  async function one(t,band,fallback,canvas){
+  async function one(t,band,fallback,canvas,sideX0,sideX1){
     if(t){
       const raw=document.createElement("canvas"); normalizeTable(photo,t,raw);
       const k=estimateShear(raw); shearCanvas(raw,k,canvas);
@@ -587,7 +699,7 @@ async function analyze(){
       return r;
     }
 
-    const ocr=await ocrBandType(img,band.band);
+    const ocr=await ocrBandType(img,band.band,sideX0,sideX1);
     if(ocr.type==="PR"){
       drawMessageCanvas(canvas,"PRIMER",`OCR: ${ocr.text||"PR-200"}`,"#eef7ff");
       return {name:"PRIMER",primer:true,reason:ocr.reason,ocr};
@@ -605,15 +717,15 @@ async function analyze(){
       return {name:null,uncertain:true,reason:"LH-100候補 / 表未検出",ocr};
     }
     if(fallback.isPrimer){
-      drawMessageCanvas(canvas,"PRIMER",`表なし / 帯あり / 色マスなし  明るさ=${fallback.q.mean.toFixed(0)}`,"#eef7ff");
-      return {name:"PRIMER",primer:true,reason:`表なし+帯あり+色マスなし / 明るさ ${fallback.q.mean.toFixed(0)}`,ocr};
+      drawMessageCanvas(canvas,"PRIMER",`表なし / PR帯寄り / 明るさ=${fallback.q.mean.toFixed(0)}`,"#eef7ff");
+      return {name:"PRIMER",primer:true,reason:`表なし+PR帯寄り / 色マス候補${fallback.colorCount} / 明るさ ${fallback.q.mean.toFixed(0)}`,ocr};
     }
     drawMessageCanvas(canvas,"要確認","表もPR-200も確定できません");
     return {name:null,uncertain:true,reason:`帯文字曖昧 LH=${band.lh.toFixed(2)} PR=${band.pr.toFixed(2)} / 色マス=${fallback.colorCount} / 明るさ=${fallback.q.mean.toFixed(0)}`,ocr};
   }
 
-  const rL=await one(tL,bandL,primerFallbackL,normL);
-  const rR=await one(tR,bandR,primerFallbackR,normR);
+  const rL=await one(tL,bandL,primerFallbackL,normL,0,mid);
+  const rR=await one(tR,bandR,primerFallbackR,normR,mid,photo.width);
 
   $("left").textContent=rL.name||"?"; $("right").textContent=rR.name||"?";
   $("leftScore").textContent=rL.primer?rL.reason:rL.uncertain?rL.reason:confidenceText(rL);
