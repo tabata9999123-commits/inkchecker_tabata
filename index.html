@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>インクチェック判定 v2.8</title>
+<title>インクチェック判定 v2.9</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f3f4f6;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -74,12 +74,24 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 .debug{display:none;margin-top:10px}.debug.on{display:block}
 .debug-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .debug canvas{width:100%;height:auto;border-radius:10px;background:#eee}
+
+@media (min-width:700px){
+  .cameraWrap{
+    width:min(520px,100%);
+    margin:10px auto 0;
+  }
+  #photo{
+    width:min(520px,100%);
+    margin:10px auto 0;
+  }
+}
+
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>インクチェック判定</h1>
-<div class="sub">v2.8 / 2本同時撮影 / 端末差を減らす固定サイズ解析 / 表示簡略化</div>
+<div class="sub">v2.9 / タブレット表示縮小 / 左右個別拡大 / 斜め四角チェック</div>
 
 <div class="card">
   <button id="startCamera" class="btn primary" type="button">カメラを起動</button>
@@ -162,7 +174,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 
 <div class="card small">
 <b>PRIMERの扱い</b><br>
-通常インクは今まで通りチェック表から判定します。撮影ガイドは目安で、多少ズレても左右それぞれを広く探します。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は端末差を減らすため、解析前に共通の 900×1200 サイズへ正規化します。
+通常インクはチェック表から判定します。左右のボトルを個別に拡大してから解析し、チェック欄は水平な長方形ではなく、各行の傾きに追従した四角形として判定します。撮影ガイドは目安で、多少ズレても左右それぞれを広く探します。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は900×1200へ正規化した後、左右のボトルを別々に拡大してチェック表を探します。
 </div>
 </div>
 <script src="app.js"></script>
