@@ -15,6 +15,44 @@ let tesseractPromise=null;
 let ocrWorkerPromise=null;
 const CANON_W=900, CANON_H=1200, CANON_ASPECT=CANON_W/CANON_H;
 const SIDE_SCALE=1.55;
+let diagState={
+  userAgent:navigator.userAgent,
+  sourceType:"-",
+  videoW:0,videoH:0,
+  trackSettings:null,
+  cropW:0,cropH:0,
+  analysisW:0,analysisH:0,
+  originalFileW:0,originalFileH:0,
+  leftTable:null,rightTable:null
+};
+function fmtNum(v){return Number.isFinite(v)?Math.round(v):"-"}
+function tableDiag(t){
+  if(!t)return "未検出";
+  const c=t.c,m=t.m,y=t.y;
+  const rowPitch=(Math.hypot(m.cx-c.cx,m.cy-c.cy)+Math.hypot(y.cx-m.cx,y.cy-m.cy))/2;
+  const tableH=rowPitch*4;
+  const colorW=(c.w+m.w+y.w)/3;
+  const tableW=colorW*4.2;
+  return `検出 / 推定表 ${fmtNum(tableW)}×${fmtNum(tableH)}px / 行間 ${fmtNum(rowPitch)}px / mode=${t.mode||"-"}`;
+}
+function updateDiag(){
+  const e=document.getElementById("diag"); if(!e)return;
+  const s=diagState.trackSettings||{};
+  e.textContent=[
+    `端末: ${navigator.platform||"-"}`,
+    `UA: ${diagState.userAgent}`,
+    ``,
+    `入力: ${diagState.sourceType}`,
+    `ライブ映像: ${diagState.videoW||"-"}×${diagState.videoH||"-"} px`,
+    `Track実設定: ${s.width||"-"}×${s.height||"-"} px / fps=${s.frameRate||"-"} / aspect=${s.aspectRatio||"-"}`,
+    `撮影時クロップ: ${diagState.cropW||"-"}×${diagState.cropH||"-"} px`,
+    `解析画像: ${diagState.analysisW||"-"}×${diagState.analysisH||"-"} px`,
+    diagState.originalFileW?`元写真: ${diagState.originalFileW}×${diagState.originalFileH} px`:`元写真: -`,
+    ``,
+    `左チェック表: ${tableDiag(diagState.leftTable)}`,
+    `右チェック表: ${tableDiag(diagState.rightTable)}`
+  ].join("\n");
+}
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function setProgress(v){bar.style.width=`${clamp(v,0,100)}%`}
@@ -80,6 +118,13 @@ async function startCamera(){
       video:{facingMode:{ideal:"environment"},width:{ideal:1600},height:{ideal:1200},aspectRatio:{ideal:CANON_ASPECT}}
     });
     video.srcObject=stream;await video.play();
+    const tr=stream.getVideoTracks()[0];
+    diagState.sourceType="アプリ内カメラ";
+    diagState.videoW=video.videoWidth;
+    diagState.videoH=video.videoHeight;
+    diagState.trackSettings=tr?.getSettings?tr.getSettings():null;
+    diagState.originalFileW=0;diagState.originalFileH=0;
+    updateDiag();
     $("cameraPlaceholder").style.display="none";
     $("captureState").classList.remove("on");
     $("retake").classList.remove("show");
@@ -106,6 +151,14 @@ function drawVisibleVideoToPhoto(){
   pctx.clearRect(0,0,CANON_W,CANON_H);
   pctx.drawImage(video,sx,sy,sw,sh,0,0,CANON_W,CANON_H);
   photo.style.display="block";
+
+  const tr=stream?.getVideoTracks?.()[0];
+  diagState.sourceType="アプリ内カメラ";
+  diagState.videoW=vw;diagState.videoH=vh;
+  diagState.trackSettings=tr?.getSettings?tr.getSettings():diagState.trackSettings;
+  diagState.cropW=Math.round(sw);diagState.cropH=Math.round(sh);
+  diagState.analysisW=photo.width;diagState.analysisH=photo.height;
+  updateDiag();
 }
 function drawAnyImageToCanonical(img){
   const iw=img.naturalWidth||img.videoWidth||img.width, ih=img.naturalHeight||img.videoHeight||img.height;
@@ -161,7 +214,14 @@ file.addEventListener("change",e=>{
   const f=e.target.files&&e.target.files[0];if(!f)return;
   const img=new Image(),url=URL.createObjectURL(f);setStatus("画像を読み込み中…","info");
   img.onload=async()=>{
-    drawAnyImageToCanonical(img);URL.revokeObjectURL(url);
+    diagState.sourceType="既存写真";
+    diagState.originalFileW=img.naturalWidth;diagState.originalFileH=img.naturalHeight;
+    diagState.videoW=0;diagState.videoH=0;diagState.trackSettings=null;
+    diagState.cropW=0;diagState.cropH=0;
+    drawAnyImageToCanonical(img);
+    diagState.analysisW=photo.width;diagState.analysisH=photo.height;
+    updateDiag();
+    URL.revokeObjectURL(url);
     $("message").textContent=`画像 ${img.naturalWidth}×${img.naturalHeight} を 900×1200 に正規化して解析します`;
     await analyze();
   };
@@ -814,6 +874,9 @@ async function analyze(){
   const sideL=makeSideSearchCanvas("L"),sideR=makeSideSearchCanvas("R");
   const searchL=detectTableOnSide(sideL),searchR=detectTableOnSide(sideR);
   const tL=searchL.t,tR=searchR.t;
+  diagState.leftTable=tL;diagState.rightTable=tR;
+  diagState.analysisW=photo.width;diagState.analysisH=photo.height;
+  updateDiag();
 
   // Primer keeps using the original canonical full image, because the band OCR
   // already has its own wide crop and preprocessing.
@@ -878,5 +941,6 @@ async function analyze(){
   else setStatus("ERROR","ng");
 }
 
+updateDiag();
 $("debugBtn").onclick=()=>$("debug").classList.toggle("on");
 })();
