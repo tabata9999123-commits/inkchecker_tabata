@@ -14,6 +14,7 @@ let templateLH=null,templatePR=null;
 let tesseractPromise=null;
 let ocrWorkerPromise=null;
 const CANON_W=900, CANON_H=1200, CANON_ASPECT=CANON_W/CANON_H;
+const SIDE_SCALE=1.55;
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function setProgress(v){bar.style.width=`${clamp(v,0,100)}%`}
@@ -166,6 +167,33 @@ file.addEventListener("change",e=>{
   };
   img.onerror=()=>setStatus("画像を読み込めませんでした","ng");img.src=url;
 });
+
+
+function makeSideSearchCanvas(side){
+  const half=photo.width/2;
+  const sx=side==="L"?0:half;
+  const sw=half, sh=photo.height;
+
+  const c=document.createElement("canvas");
+  c.width=Math.round(sw*SIDE_SCALE);
+  c.height=Math.round(sh*SIDE_SCALE);
+
+  const ctx=c.getContext("2d",{willReadFrequently:true});
+  ctx.imageSmoothingEnabled=true;
+  ctx.imageSmoothingQuality="high";
+  ctx.drawImage(photo,sx,0,sw,sh,0,0,c.width,c.height);
+  return c;
+}
+function detectTableOnSide(sideCanvas){
+  const ctx=sideCanvas.getContext("2d",{willReadFrequently:true});
+  const img=ctx.getImageData(0,0,sideCanvas.width,sideCanvas.height);
+  const masks=makeColorMasks(img);
+  const C=connectedComponents(masks.C,masks.W,masks.H);
+  const M=connectedComponents(masks.M,masks.W,masks.H);
+  const Y=connectedComponents(masks.Y,masks.W,masks.H);
+  const t=detectTable(C,M,Y,0,sideCanvas.width,sideCanvas.height);
+  return {t,C,M,Y,img};
+}
 
 function rgbToHSV(r,g,b){
   r/=255;g/=255;b/=255;
@@ -381,31 +409,110 @@ function markShapeMetrics(points,minx,miny,bw,bh,area){
   if(diag>.34&&axis<.42)factor*=1.16;
   return{diag,axis,factor};
 }
-function scoreCell(g,W,H,x0,x1,y0,y1){
-  const cw=x1-x0,rh=y1-y0,ax=Math.round(x0+cw*.18),bx=Math.round(x1-cw*.12),ay=Math.round(y0+rh*.18),by=Math.round(y1-rh*.18);
-  const ww=bx-ax,hh=by-ay;if(ww<10||hh<10)return{score:0,areaR:0,diag:0,axis:1};
-  let sum=0,n=0;for(let y=ay;y<by;y+=2)for(let x=ax;x<bx;x+=2){sum+=g[y*W+x];n++}
-  const mean=sum/n,thr=Math.min(135,mean-45),mask=new Uint8Array(ww*hh);
-  for(let yy=0;yy<hh;yy++)for(let xx=0;xx<ww;xx++)mask[yy*ww+xx]=g[(ay+yy)*W+(ax+xx)]<thr?1:0;
-  const seen=new Uint8Array(ww*hh),q=new Int32Array(ww*hh);let best=0,bestAreaR=0,bestDiag=0,bestAxis=1;
+
+function scoreNormalizedPatch(g,SW,SH){
+  const x0=Math.round(SW*.13),x1=Math.round(SW*.87);
+  const y0=Math.round(SH*.13),y1=Math.round(SH*.87);
+  const ww=x1-x0,hh=y1-y0;
+  let sum=0,n=0;
+  for(let y=y0;y<y1;y+=2)for(let x=x0;x<x1;x+=2){sum+=g[y*SW+x];n++}
+  const mean=sum/Math.max(1,n),thr=Math.min(145,mean-42),mask=new Uint8Array(ww*hh);
+  for(let yy=0;yy<hh;yy++)for(let xx=0;xx<ww;xx++)mask[yy*ww+xx]=g[(y0+yy)*SW+(x0+xx)]<thr?1:0;
+
+  const seen=new Uint8Array(ww*hh),q=new Int32Array(ww*hh);
+  let best=0,bestAreaR=0,bestDiag=0,bestAxis=1;
+
   for(let p=0;p<mask.length;p++){
     if(!mask[p]||seen[p])continue;
     let head=0,tail=0,area=0,minx=ww,maxx=0,miny=hh,maxy=0;
-    const pts=[]; q[tail++]=p;seen[p]=1;
+    const pts=[];
+    q[tail++]=p;seen[p]=1;
+
     while(head<tail){
-      const cur=q[head++],y=(cur/ww)|0,x=cur-y*ww;area++;pts.push([x,y]);
+      const cur=q[head++],y=(cur/ww)|0,x=cur-y*ww;
+      area++;pts.push([x,y]);
       minx=Math.min(minx,x);maxx=Math.max(maxx,x);miny=Math.min(miny,y);maxy=Math.max(maxy,y);
       const ns=[];if(x)ns.push(cur-1);if(x<ww-1)ns.push(cur+1);if(y)ns.push(cur-ww);if(y<hh-1)ns.push(cur+ww);
       for(const np of ns)if(mask[np]&&!seen[np]){seen[np]=1;q[tail++]=np}
     }
-    const bw=maxx-minx+1,bh=maxy-miny+1;if(area<12||bw<5||bh<5||bw>ww*.95||bh>hh*.95)continue;
+
+    const bw=maxx-minx+1,bh=maxy-miny+1;
+    if(area<10||bw<5||bh<5||bw>ww*.96||bh>hh*.96)continue;
+
     const fill=area/(bw*bh),areaR=area/(ww*hh),span=(bw/ww)*(bh/hh);
     const shape=markShapeMetrics(pts,minx,miny,bw,bh,area);
-    let s=areaR*(1+Math.min(1.3,span*2.5))*(.65+Math.min(.9,fill))*shape.factor;
-    if(bw>bh*4||bh>bw*4)s*=.25;
+    let s=areaR*(1+Math.min(1.35,span*2.7))*(.64+Math.min(.95,fill))*shape.factor;
+    if(bw>bh*4.4||bh>bw*4.4)s*=.22;
+
     if(s>best){best=s;bestAreaR=areaR;bestDiag=shape.diag;bestAxis=shape.axis}
   }
-  return{score:best,areaR:bestAreaR,diag:bestDiag,axis:bestAxis};
+  return {score:best,areaR:bestAreaR,diag:bestDiag,axis:bestAxis};
+}
+function bilerpQuad(q,u,v){
+  const topX=q[0].x+(q[1].x-q[0].x)*u;
+  const topY=q[0].y+(q[1].y-q[0].y)*u;
+  const botX=q[3].x+(q[2].x-q[3].x)*u;
+  const botY=q[3].y+(q[2].y-q[3].y)*u;
+  return {x:topX+(botX-topX)*v,y:topY+(botY-topY)*v};
+}
+function scoreQuad(g,W,H,q){
+  const SW=84,SH=84,out=new Uint8Array(SW*SH);
+  for(let yy=0;yy<SH;yy++){
+    const v=yy/(SH-1);
+    for(let xx=0;xx<SW;xx++){
+      const u=xx/(SW-1),p=bilerpQuad(q,u,v);
+      const x=clamp(Math.round(p.x),0,W-1),y=clamp(Math.round(p.y),0,H-1);
+      out[yy*SW+xx]=g[y*W+x];
+    }
+  }
+  return scoreNormalizedPatch(out,SW,SH);
+}
+function horizontalEdgeScore(g,W,H,y,x0,x1){
+  y=clamp(Math.round(y),1,H-2);
+  let s=0;
+  const xa=Math.max(1,Math.round(x0)),xb=Math.min(W-2,Math.round(x1));
+  for(let x=xa;x<xb;x++)s+=Math.abs(g[(y+1)*W+x]-g[(y-1)*W+x]);
+  return s;
+}
+function refineBoundaryY(g,W,H,base,x0,x1){
+  let best=clamp(Math.round(base),2,H-3),bestS=-1;
+  const lo=Math.max(2,Math.round(base-24)),hi=Math.min(H-3,Math.round(base+24));
+  for(let y=lo;y<=hi;y++){
+    const s=horizontalEdgeScore(g,W,H,y,x0,x1)-Math.abs(y-base)*7.5;
+    if(s>bestS){bestS=s;best=y}
+  }
+  return best;
+}
+function makeCellQuad(g,W,H,x0,x1,topBase,bottomBase){
+  const w=x1-x0,margin=Math.max(5,w*.10),mid=(x0+x1)/2;
+  const topL=refineBoundaryY(g,W,H,topBase,x0+margin,mid-margin*.2);
+  const topR=refineBoundaryY(g,W,H,topBase,mid+margin*.2,x1-margin);
+  const botL=refineBoundaryY(g,W,H,bottomBase,x0+margin,mid-margin*.2);
+  const botR=refineBoundaryY(g,W,H,bottomBase,mid+margin*.2,x1-margin);
+
+  // Keep the quadrilateral sane even if one faint grid line is missed.
+  const maxTilt=22;
+  const tR=clamp(topR,topL-maxTilt,topL+maxTilt);
+  const bR=clamp(botR,botL-maxTilt,botL+maxTilt);
+
+  return [
+    {x:x0,y:topL},
+    {x:x1,y:tR},
+    {x:x1,y:bR},
+    {x:x0,y:botL}
+  ];
+}
+function drawQuad(ctx,q,inset=0){
+  let qq=q;
+  if(inset){
+    const cx=q.reduce((s,p)=>s+p.x,0)/4,cy=q.reduce((s,p)=>s+p.y,0)/4;
+    qq=q.map(p=>({x:p.x+(cx-p.x)*inset,y:p.y+(cy-p.y)*inset}));
+  }
+  ctx.beginPath();
+  ctx.moveTo(qq[0].x,qq[0].y);
+  for(let i=1;i<4;i++)ctx.lineTo(qq[i].x,qq[i].y);
+  ctx.closePath();
+  ctx.stroke();
 }
 function verticalEdgeScore(g,W,H,x,y0,y1){
   let s=0;x=clamp(Math.round(x),1,W-2);
@@ -439,30 +546,45 @@ function buildRowGeometries(canvas,geo){
   }
   return rows;
 }
+
 function classifyNormalized(canvas){
   const ctx=canvas.getContext("2d",{willReadFrequently:true}),{g,W,H}=grayscale(canvas),geo=detectLabelGeometry(canvas);
   if(!geo)return{name:null,best:{name:"?",score:0,areaR:0},second:{name:"?",score:0,areaR:0},gap:0,vals:[],labelGeometry:null,rowGeometry:null};
+
   const rows=buildRowGeometries(canvas,geo),vals=[];
   for(let r=0;r<4;r++){
     const row=rows[r];
-    vals.push({name:NAMES_L[r],row:r,side:"L",...scoreCell(g,W,H,row.leftCheck0,row.leftCheck1,row.y0,row.y1)});
-    vals.push({name:NAMES_R[r],row:r,side:"R",...scoreCell(g,W,H,row.rightCheck0,row.rightCheck1,row.y0,row.y1)});
+
+    const qL=makeCellQuad(g,W,H,row.leftCheck0,row.leftCheck1,row.y0,row.y1);
+    const qR=makeCellQuad(g,W,H,row.rightCheck0,row.rightCheck1,row.y0,row.y1);
+
+    vals.push({name:NAMES_L[r],row:r,side:"L",quad:qL,...scoreQuad(g,W,H,qL)});
+    vals.push({name:NAMES_R[r],row:r,side:"R",quad:qR,...scoreQuad(g,W,H,qR)});
   }
-  vals.sort((a,b)=>b.score-a.score);const best=vals[0],second=vals[1],gap=best.score-second.score;
-  const shapeOk=(best.diag>.18)||(best.areaR>.02&&best.axis<.50);
-  const accepted=best.areaR>.006&&best.score>.038&&(gap>.012||best.score>second.score*1.30)&&shapeOk;
-  ctx.save();ctx.lineWidth=3;ctx.strokeStyle="#2563eb";
+
+  vals.sort((a,b)=>b.score-a.score);
+  const best=vals[0],second=vals[1],gap=best.score-second.score;
+
+  const shapeOk=(best.diag>.16)||(best.areaR>.018&&best.axis<.52);
+  const accepted=best.areaR>.0055&&best.score>.034&&(gap>.010||best.score>second.score*1.26)&&shapeOk;
+
+  ctx.save();
+  ctx.lineWidth=3;
+  ctx.strokeStyle="#2563eb";
   for(const row of rows){
     ctx.strokeRect(row.color0+2,row.y0+2,row.color1-row.color0-4,row.y1-row.y0-4);
     ctx.strokeRect(row.label0+2,row.y0+2,row.label1-row.label0-4,row.y1-row.y0-4);
   }
+
+  // Actual check areas are now drawn as angle-following quadrilaterals.
   ctx.strokeStyle="#16a34a";
-  for(const row of rows){
-    ctx.strokeRect(row.leftCheck0+2,row.y0+2,row.leftCheck1-row.leftCheck0-4,row.y1-row.y0-4);
-    ctx.strokeRect(row.rightCheck0+2,row.y0+2,row.rightCheck1-row.rightCheck0-4,row.y1-row.y0-4);
-  }
-  const brow=rows[best.row],bx0=best.side==="L"?brow.leftCheck0:brow.rightCheck0,bx1=best.side==="L"?brow.leftCheck1:brow.rightCheck1;
-  ctx.lineWidth=7;ctx.strokeStyle=accepted?"#e00000":"#f59e0b";ctx.strokeRect(bx0+7,brow.y0+7,bx1-bx0-14,brow.y1-brow.y0-14);ctx.restore();
+  for(const v of vals)drawQuad(ctx,v.quad,.03);
+
+  ctx.lineWidth=7;
+  ctx.strokeStyle=accepted?"#e00000":"#f59e0b";
+  drawQuad(ctx,best.quad,.10);
+  ctx.restore();
+
   return{name:accepted?best.name:null,best,second,gap,vals,labelGeometry:geo,rowGeometry:rows};
 }
 function confidenceText(r){ return ""; }
@@ -682,24 +804,32 @@ async function analyze(){
   $("left").textContent="-";$("right").textContent="-";$("leftScore").textContent="";$("rightScore").textContent="";
   setProgress(5);setStatus("2本を確認しています…","info");await sleep(20);
 
-  const img=pctx.getImageData(0,0,photo.width,photo.height),masks=makeColorMasks(img);
+  const img=pctx.getImageData(0,0,photo.width,photo.height);
+  const masks=makeColorMasks(img);
   const compsC=connectedComponents(masks.C,masks.W,masks.H),compsM=connectedComponents(masks.M,masks.W,masks.H),compsY=connectedComponents(masks.Y,masks.W,masks.H);
   const mid=photo.width/2;
 
-  const tL=detectTable(compsC,compsM,compsY,0,mid,photo.height), tR=detectTable(compsC,compsM,compsY,mid,photo.width,photo.height);
+  // Normal ink detection is done independently on enlarged left/right images.
+  // This avoids the tablet camera making each bottle too small inside the full frame.
+  const sideL=makeSideSearchCanvas("L"),sideR=makeSideSearchCanvas("R");
+  const searchL=detectTableOnSide(sideL),searchR=detectTableOnSide(sideR);
+  const tL=searchL.t,tR=searchR.t;
+
+  // Primer keeps using the original canonical full image, because the band OCR
+  // already has its own wide crop and preprocessing.
   const bandL=classifyBandText(img,0,mid), bandR=classifyBandText(img,mid,photo.width);
   const primerFallbackL=safePrimerFallback(img,bandL,compsC,compsM,compsY,0,mid), primerFallbackR=safePrimerFallback(img,bandR,compsC,compsM,compsY,mid,photo.width);
 
   const centers=[];
-  if(tL)centers.push((tL.c.cx+tL.m.cx+tL.y.cx)/3); else if(bandL.band)centers.push(bandL.band.x+bandL.band.w/2);
-  if(tR)centers.push((tR.c.cx+tR.m.cx+tR.y.cx)/3); else if(bandR.band)centers.push(bandR.band.x+bandR.band.w/2);
+  if(bandL.band)centers.push(bandL.band.x+bandL.band.w/2);
+  if(bandR.band)centers.push(bandR.band.x+bandR.band.w/2);
   if(centers.length===2 && Math.abs(centers[1]-centers[0])<photo.width*.24){setStatus("要確認：2本を左右に離して写してください","warn");setProgress(100);return;}
 
   setProgress(35);setStatus("色・PRIMERを判定中…","info");await sleep(20);
 
-  async function one(t,band,fallback,canvas,sideX0,sideX1){
+  async function one(t,band,fallback,canvas,sideX0,sideX1,sourceCanvas){
     if(t){
-      const raw=document.createElement("canvas"); normalizeTable(photo,t,raw);
+      const raw=document.createElement("canvas"); normalizeTable(sourceCanvas,t,raw);
       const k=estimateShear(raw); shearCanvas(raw,k,canvas);
       const r=classifyNormalized(canvas); r.shear=k; r.mode=t.mode; r.band=band; r.ocr=null;
       return r;
@@ -730,8 +860,8 @@ async function analyze(){
     return {name:null,uncertain:true,reason:`帯文字曖昧 LH=${band.lh.toFixed(2)} PR=${band.pr.toFixed(2)} / 色マス=${fallback.colorCount} / 明るさ=${fallback.q.mean.toFixed(0)}`,ocr};
   }
 
-  const rL=await one(tL,bandL,primerFallbackL,normL,0,mid);
-  const rR=await one(tR,bandR,primerFallbackR,normR,mid,photo.width);
+  const rL=await one(tL,bandL,primerFallbackL,normL,0,mid,sideL);
+  const rR=await one(tR,bandR,primerFallbackR,normR,mid,photo.width,sideR);
 
   $("left").textContent=rL.name||"?"; $("right").textContent=rR.name||"?";
   $("leftScore").textContent=rL.uncertain?"要確認":(rL.primer?"":"");
@@ -739,7 +869,7 @@ async function analyze(){
 
   const desc=r=>r.primer||r.uncertain
     ?`${r.name||"要確認"} / ${r.reason}${r.ocr?` / OCR=${(r.ocr.text||"-").replace(/\s+/g," ")}`:""}`
-    :`${r.best.name} score=${r.best.score.toFixed(3)} / 2位=${r.second.name} ${r.second.score.toFixed(3)} / diag=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
+    :`${r.best.name} / 2位=${r.second.name} / 斜線=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
   $("debugText").textContent=`左: ${desc(rL)}　右: ${desc(rR)}`;
 
   setProgress(100);
