@@ -15,44 +15,6 @@ let tesseractPromise=null;
 let ocrWorkerPromise=null;
 const CANON_W=900, CANON_H=1200, CANON_ASPECT=CANON_W/CANON_H;
 const SIDE_SCALE=1.55;
-let diagState={
-  userAgent:navigator.userAgent,
-  sourceType:"-",
-  videoW:0,videoH:0,
-  trackSettings:null,
-  cropW:0,cropH:0,
-  analysisW:0,analysisH:0,
-  originalFileW:0,originalFileH:0,
-  leftTable:null,rightTable:null
-};
-function fmtNum(v){return Number.isFinite(v)?Math.round(v):"-"}
-function tableDiag(t){
-  if(!t)return "未検出";
-  const c=t.c,m=t.m,y=t.y;
-  const rowPitch=(Math.hypot(m.cx-c.cx,m.cy-c.cy)+Math.hypot(y.cx-m.cx,y.cy-m.cy))/2;
-  const tableH=rowPitch*4;
-  const colorW=(c.w+m.w+y.w)/3;
-  const tableW=colorW*4.2;
-  return `検出 / 推定表 ${fmtNum(tableW)}×${fmtNum(tableH)}px / 行間 ${fmtNum(rowPitch)}px / mode=${t.mode||"-"}`;
-}
-function updateDiag(){
-  const e=document.getElementById("diag"); if(!e)return;
-  const s=diagState.trackSettings||{};
-  e.textContent=[
-    `端末: ${navigator.platform||"-"}`,
-    `UA: ${diagState.userAgent}`,
-    ``,
-    `入力: ${diagState.sourceType}`,
-    `ライブ映像: ${diagState.videoW||"-"}×${diagState.videoH||"-"} px`,
-    `Track実設定: ${s.width||"-"}×${s.height||"-"} px / fps=${s.frameRate||"-"} / aspect=${s.aspectRatio||"-"}`,
-    `撮影時クロップ: ${diagState.cropW||"-"}×${diagState.cropH||"-"} px`,
-    `解析画像: ${diagState.analysisW||"-"}×${diagState.analysisH||"-"} px`,
-    diagState.originalFileW?`元写真: ${diagState.originalFileW}×${diagState.originalFileH} px`:`元写真: -`,
-    ``,
-    `左チェック表: ${tableDiag(diagState.leftTable)}`,
-    `右チェック表: ${tableDiag(diagState.rightTable)}`
-  ].join("\n");
-}
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function setProgress(v){bar.style.width=`${clamp(v,0,100)}%`}
@@ -118,13 +80,6 @@ async function startCamera(){
       video:{facingMode:{ideal:"environment"},width:{ideal:1600},height:{ideal:1200},aspectRatio:{ideal:CANON_ASPECT}}
     });
     video.srcObject=stream;await video.play();
-    const tr=stream.getVideoTracks()[0];
-    diagState.sourceType="アプリ内カメラ";
-    diagState.videoW=video.videoWidth;
-    diagState.videoH=video.videoHeight;
-    diagState.trackSettings=tr?.getSettings?tr.getSettings():null;
-    diagState.originalFileW=0;diagState.originalFileH=0;
-    updateDiag();
     $("cameraPlaceholder").style.display="none";
     $("captureState").classList.remove("on");
     $("retake").classList.remove("show");
@@ -151,14 +106,6 @@ function drawVisibleVideoToPhoto(){
   pctx.clearRect(0,0,CANON_W,CANON_H);
   pctx.drawImage(video,sx,sy,sw,sh,0,0,CANON_W,CANON_H);
   photo.style.display="block";
-
-  const tr=stream?.getVideoTracks?.()[0];
-  diagState.sourceType="アプリ内カメラ";
-  diagState.videoW=vw;diagState.videoH=vh;
-  diagState.trackSettings=tr?.getSettings?tr.getSettings():diagState.trackSettings;
-  diagState.cropW=Math.round(sw);diagState.cropH=Math.round(sh);
-  diagState.analysisW=photo.width;diagState.analysisH=photo.height;
-  updateDiag();
 }
 function drawAnyImageToCanonical(img){
   const iw=img.naturalWidth||img.videoWidth||img.width, ih=img.naturalHeight||img.videoHeight||img.height;
@@ -214,14 +161,7 @@ file.addEventListener("change",e=>{
   const f=e.target.files&&e.target.files[0];if(!f)return;
   const img=new Image(),url=URL.createObjectURL(f);setStatus("画像を読み込み中…","info");
   img.onload=async()=>{
-    diagState.sourceType="既存写真";
-    diagState.originalFileW=img.naturalWidth;diagState.originalFileH=img.naturalHeight;
-    diagState.videoW=0;diagState.videoH=0;diagState.trackSettings=null;
-    diagState.cropW=0;diagState.cropH=0;
-    drawAnyImageToCanonical(img);
-    diagState.analysisW=photo.width;diagState.analysisH=photo.height;
-    updateDiag();
-    URL.revokeObjectURL(url);
+    drawAnyImageToCanonical(img);URL.revokeObjectURL(url);
     $("message").textContent=`画像 ${img.naturalWidth}×${img.naturalHeight} を 900×1200 に正規化して解析します`;
     await analyze();
   };
@@ -412,6 +352,7 @@ function maskPixelForLabel(kind,r,g,b){
   if(kind==="M")return s>.30&&v>.22&&((h>=315&&h<=359)||(h>=0&&h<=12));
   if(kind==="Y")return s>.34&&v>.28&&h>=38&&h<=72;
   if(kind==="LCBG")return v>.40&&s>.055&&s<.62&&h>=170&&h<=235&&b>r+6;
+  if(kind==="LMBG")return v>.42&&s>.045&&s<.58&&((h>=325&&h<=359)||(h>=0&&h<=18))&&r>g+7;
   return false;
 }
 function percentileNumber(arr,p){if(!arr.length)return null;arr.sort((a,b)=>a-b);return arr[Math.max(0,Math.min(arr.length-1,Math.floor((arr.length-1)*p)))]}
@@ -605,6 +546,223 @@ function buildRowGeometries(canvas,geo){
     });
   }
   return rows;
+}
+
+
+function rowColorRange(canvas,kind,y0,y1,xMax=230){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const im=ctx.getImageData(0,0,canvas.width,canvas.height),W=im.width,H=im.height,d=im.data;
+  const xs=[];
+  for(let y=Math.max(0,y0);y<Math.min(H,y1);y+=2){
+    for(let x=0;x<Math.min(W,xMax);x++){
+      const i=(y*W+x)*4;
+      if(maskPixelForLabel(kind,d[i],d[i+1],d[i+2]))xs.push(x);
+    }
+  }
+  if(xs.length<80)return null;
+  return [percentileNumber(xs.slice(),.06),percentileNumber(xs.slice(),.94)];
+}
+function rowRightLabelRange(canvas,kind,y0,y1,xMin,xMax){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const im=ctx.getImageData(0,0,canvas.width,canvas.height),W=im.width,H=im.height,d=im.data;
+  const xs=[];
+  for(let y=Math.max(0,y0);y<Math.min(H,y1);y++){
+    for(let x=Math.max(0,Math.floor(xMin));x<Math.min(W,Math.floor(xMax));x++){
+      const i=(y*W+x)*4;
+      if(maskPixelForLabel(kind,d[i],d[i+1],d[i+2]))xs.push(x);
+    }
+  }
+  if(xs.length<120)return null;
+  return [percentileNumber(xs.slice(),.07),percentileNumber(xs.slice(),.93)];
+}
+function linearFitAt(vals,row){
+  const pts=[];
+  for(let i=0;i<vals.length;i++)if(vals[i]!=null)pts.push([i,vals[i]]);
+  if(!pts.length)return null;
+  if(pts.length===1)return pts[0][1];
+  let sx=0,sy=0,sxx=0,sxy=0;
+  for(const [x,y] of pts){sx+=x;sy+=y;sxx+=x*x;sxy+=x*y}
+  const n=pts.length,den=n*sxx-sx*sx;
+  if(Math.abs(den)<1e-6)return sy/n;
+  const a=(n*sxy-sx*sy)/den,b=(sy-a*sx)/n;
+  return a*row+b;
+}
+function deriveCylinderAnchors(canvas){
+  const W=canvas.width,H=canvas.height;
+  const rows=[["C",30,130],["M",130,230],["Y",230,330]];
+  const left0=[null,null,null,null],left1=[null,null,null,null];
+
+  for(let r=0;r<3;r++){
+    const rr=rowColorRange(canvas,rows[r][0],rows[r][1][0]||rows[r][1],rows[r][2]||0);
+  }
+
+  // C/M/Y are strong anchors. K is extrapolated from them because black itself
+  // is less distinctive than the three colored cells.
+  for(let r=0;r<3;r++){
+    const [kind,y0,y1]=rows[r];
+    const rg=rowColorRange(canvas,kind,y0,y1,235);
+    if(rg){left0[r]=rg[0];left1[r]=rg[1]}
+  }
+  if([left0[0],left0[1],left0[2]].filter(v=>v!=null).length<2)return null;
+
+  left0[3]=linearFitAt(left0,3);
+  left1[3]=linearFitAt(left1,3);
+
+  // The LC and LM colored backgrounds are used only as horizontal/cylindrical
+  // anchors. W/CL are then extrapolated from the LC/LM trend.
+  const baseL1=linearFitAt(left1,2) || 100;
+  const lc=rowRightLabelRange(canvas,"LCBG",230,330,baseL1+18,Math.min(W,baseL1+390));
+  const lm=rowRightLabelRange(canvas,"LMBG",330,430,baseL1+18,Math.min(W,baseL1+390));
+
+  const r0=[null,null,null,null],r1=[null,null,null,null];
+  if(lc){r0[2]=lc[0];r1[2]=lc[1]}
+  if(lm){r0[3]=lm[0];r1[3]=lm[1]}
+
+  // If LM is not clean enough, use the old LC geometry as a stable fallback.
+  if(!lc || !lm){
+    const geo=detectLabelGeometry(canvas);
+    if(geo){
+      if(!lc){r0[2]=geo.xR0;r1[2]=geo.xR1}
+      if(!lm){r0[3]=geo.xR0;r1[3]=geo.xR1}
+    }
+  }
+  if(r0.filter(v=>v!=null).length<1)return null;
+
+  for(let r=0;r<4;r++){
+    if(r0[r]==null)r0[r]=linearFitAt(r0,r);
+    if(r1[r]==null)r1[r]=linearFitAt(r1,r);
+  }
+
+  const bounds=[];
+  for(let r=0;r<4;r++){
+    let a0=linearFitAt(left0,r),a1=linearFitAt(left1,r);
+    let b0=r0[r],b1=r1[r];
+    if([a0,a1,b0,b1].some(v=>v==null))return null;
+
+    // Sane width constraints; prevent a colored reflection from becoming an anchor.
+    const colorW=a1-a0,labelW=b1-b0,leftCheck=b0-a1;
+    if(colorW<18||colorW>130||labelW<28||labelW>180||leftCheck<22||leftCheck>190)return null;
+
+    // Right check column is physically close to the left check column width.
+    // This avoids relying on the faint outer grid line.
+    const rightCheck=Math.max(28,Math.min(175,leftCheck));
+    const b4=Math.min(W-5,b1+rightCheck);
+    if(b4<=b1+12)return null;
+
+    bounds.push([a0,a1,b0,b1,b4]);
+  }
+  return {bounds};
+}
+function interpRowBoundary(bounds,y,k){
+  const centers=[80,180,280,380];
+  if(y<=centers[0]){
+    const slope=(bounds[1][k]-bounds[0][k])/(centers[1]-centers[0]);
+    return bounds[0][k]+slope*(y-centers[0]);
+  }
+  if(y>=centers[3]){
+    const slope=(bounds[3][k]-bounds[2][k])/(centers[3]-centers[2]);
+    return bounds[3][k]+slope*(y-centers[3]);
+  }
+  for(let r=0;r<3;r++){
+    if(y>=centers[r]&&y<=centers[r+1]){
+      const t=(y-centers[r])/(centers[r+1]-centers[r]);
+      return bounds[r][k]+(bounds[r+1][k]-bounds[r][k])*t;
+    }
+  }
+  return bounds[0][k];
+}
+function mapTargetXToSource(x,targetB,sourceB){
+  if(x<=targetB[0])return sourceB[0];
+  if(x>=targetB[4])return sourceB[4];
+  for(let k=0;k<4;k++){
+    if(x>=targetB[k]&&x<=targetB[k+1]){
+      const den=targetB[k+1]-targetB[k];
+      const t=den?((x-targetB[k])/den):0;
+      return sourceB[k]+(sourceB[k+1]-sourceB[k])*t;
+    }
+  }
+  return sourceB[4];
+}
+function cylindricalRectify(src,dst){
+  const anchors=deriveCylinderAnchors(src);
+  if(!anchors)return null;
+
+  const sctx=src.getContext("2d",{willReadFrequently:true});
+  const sim=sctx.getImageData(0,0,src.width,src.height);
+  const sd=sim.data,SW=sim.width,SH=sim.height;
+
+  dst.width=600;dst.height=500;
+  const dctx=dst.getContext("2d",{willReadFrequently:true});
+  dctx.fillStyle="#fff";dctx.fillRect(0,0,600,500);
+  const dim=dctx.getImageData(0,0,600,500),dd=dim.data;
+
+  // Standardized front-facing table geometry.
+  const targetB=[45,130,260,390,520];
+
+  for(let y=20;y<455;y++){
+    const sourceB=[
+      interpRowBoundary(anchors.bounds,y,0),
+      interpRowBoundary(anchors.bounds,y,1),
+      interpRowBoundary(anchors.bounds,y,2),
+      interpRowBoundary(anchors.bounds,y,3),
+      interpRowBoundary(anchors.bounds,y,4)
+    ];
+
+    for(let x=targetB[0];x<=targetB[4];x++){
+      const sx=mapTargetXToSource(x,targetB,sourceB);
+      const sy=y;
+      const ix=clamp(Math.round(sx),0,SW-1),iy=clamp(Math.round(sy),0,SH-1);
+      const si=(iy*SW+ix)*4,di=(y*600+x)*4;
+      dd[di]=sd[si];dd[di+1]=sd[si+1];dd[di+2]=sd[si+2];dd[di+3]=255;
+    }
+  }
+  dctx.putImageData(dim,0,0);
+  return {targetB,anchors};
+}
+function classifyRectified(canvas,rectInfo){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true}),{g,W,H}=grayscale(canvas);
+  const ys=[30,130,230,330,430],b=rectInfo.targetB,vals=[];
+
+  for(let r=0;r<4;r++){
+    const qL=[
+      {x:b[1],y:ys[r]},{x:b[2],y:ys[r]},
+      {x:b[2],y:ys[r+1]},{x:b[1],y:ys[r+1]}
+    ];
+    const qR=[
+      {x:b[3],y:ys[r]},{x:b[4],y:ys[r]},
+      {x:b[4],y:ys[r+1]},{x:b[3],y:ys[r+1]}
+    ];
+    vals.push({name:NAMES_L[r],row:r,side:"L",quad:qL,...scoreQuad(g,W,H,qL)});
+    vals.push({name:NAMES_R[r],row:r,side:"R",quad:qR,...scoreQuad(g,W,H,qR)});
+  }
+
+  vals.sort((a,b)=>b.score-a.score);
+  const best=vals[0],second=vals[1],gap=best.score-second.score;
+  const shapeOk=(best.diag>.14)||(best.areaR>.017&&best.axis<.54);
+  const accepted=best.areaR>.005&&best.score>.031&&(gap>.009||best.score>second.score*1.24)&&shapeOk;
+
+  ctx.save();
+  ctx.lineWidth=3;ctx.strokeStyle="#2563eb";
+  for(let r=0;r<4;r++){
+    ctx.strokeRect(b[0]+2,ys[r]+2,b[1]-b[0]-4,ys[r+1]-ys[r]-4);
+    ctx.strokeRect(b[2]+2,ys[r]+2,b[3]-b[2]-4,ys[r+1]-ys[r]-4);
+  }
+  ctx.strokeStyle="#16a34a";
+  for(let r=0;r<4;r++){
+    ctx.strokeRect(b[1]+2,ys[r]+2,b[2]-b[1]-4,ys[r+1]-ys[r]-4);
+    ctx.strokeRect(b[3]+2,ys[r]+2,b[4]-b[3]-4,ys[r+1]-ys[r]-4);
+  }
+  const bx0=best.side==="L"?b[1]:b[3],bx1=best.side==="L"?b[2]:b[4];
+  ctx.lineWidth=7;ctx.strokeStyle=accepted?"#e00000":"#f59e0b";
+  ctx.strokeRect(bx0+8,ys[best.row]+8,bx1-bx0-16,ys[best.row+1]-ys[best.row]-16);
+  ctx.restore();
+
+  return {
+    name:accepted?best.name:null,
+    best,second,gap,vals,
+    cylinderRectified:true,
+    anchorBounds:rectInfo.anchors.bounds
+  };
 }
 
 function classifyNormalized(canvas){
@@ -874,9 +1032,6 @@ async function analyze(){
   const sideL=makeSideSearchCanvas("L"),sideR=makeSideSearchCanvas("R");
   const searchL=detectTableOnSide(sideL),searchR=detectTableOnSide(sideR);
   const tL=searchL.t,tR=searchR.t;
-  diagState.leftTable=tL;diagState.rightTable=tR;
-  diagState.analysisW=photo.width;diagState.analysisH=photo.height;
-  updateDiag();
 
   // Primer keeps using the original canonical full image, because the band OCR
   // already has its own wide crop and preprocessing.
@@ -893,8 +1048,23 @@ async function analyze(){
   async function one(t,band,fallback,canvas,sideX0,sideX1,sourceCanvas){
     if(t){
       const raw=document.createElement("canvas"); normalizeTable(sourceCanvas,t,raw);
-      const k=estimateShear(raw); shearCanvas(raw,k,canvas);
-      const r=classifyNormalized(canvas); r.shear=k; r.mode=t.mode; r.band=band; r.ocr=null;
+      const k=estimateShear(raw);
+      const sheared=document.createElement("canvas");
+      shearCanvas(raw,k,sheared);
+
+      // New main path: unroll the cylindrical label using strong colored anchors.
+      const rectInfo=cylindricalRectify(sheared,canvas);
+      if(rectInfo){
+        const r=classifyRectified(canvas,rectInfo);
+        r.shear=k;r.mode=t.mode;r.band=band;r.ocr=null;r.rectifyMode="cylinder";
+        return r;
+      }
+
+      // Safe fallback: keep the previous v2.9 path if the anchors are not reliable.
+      canvas.width=sheared.width;canvas.height=sheared.height;
+      canvas.getContext("2d",{willReadFrequently:true}).drawImage(sheared,0,0);
+      const r=classifyNormalized(canvas);
+      r.shear=k;r.mode=t.mode;r.band=band;r.ocr=null;r.rectifyMode="fallback";
       return r;
     }
 
@@ -932,7 +1102,7 @@ async function analyze(){
 
   const desc=r=>r.primer||r.uncertain
     ?`${r.name||"要確認"} / ${r.reason}${r.ocr?` / OCR=${(r.ocr.text||"-").replace(/\s+/g," ")}`:""}`
-    :`${r.best.name} / 2位=${r.second.name} / 斜線=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
+    :`${r.best.name} / 2位=${r.second.name} / 補正=${r.rectifyMode||"-"} / 斜線=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
   $("debugText").textContent=`左: ${desc(rL)}　右: ${desc(rR)}`;
 
   setProgress(100);
@@ -941,6 +1111,5 @@ async function analyze(){
   else setStatus("ERROR","ng");
 }
 
-updateDiag();
 $("debugBtn").onclick=()=>$("debug").classList.toggle("on");
 })();
