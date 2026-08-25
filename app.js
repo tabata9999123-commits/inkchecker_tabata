@@ -13,6 +13,7 @@ const PR_TEMPLATE="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAABQCAAAAAA
 let templateLH=null,templatePR=null;
 let tesseractPromise=null;
 let ocrWorkerPromise=null;
+const CANON_W=900, CANON_H=1200, CANON_ASPECT=CANON_W/CANON_H;
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function setProgress(v){bar.style.width=`${clamp(v,0,100)}%`}
@@ -75,7 +76,7 @@ async function startCamera(){
     if(stream)stream.getTracks().forEach(t=>t.stop());
     stream=await navigator.mediaDevices.getUserMedia({
       audio:false,
-      video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1440}}
+      video:{facingMode:{ideal:"environment"},width:{ideal:1600},height:{ideal:1200},aspectRatio:{ideal:CANON_ASPECT}}
     });
     video.srcObject=stream;await video.play();
     $("cameraPlaceholder").style.display="none";
@@ -93,17 +94,29 @@ function stopCamera(){
 }
 startCameraBtn.onclick=startCamera;stopCameraBtn.onclick=stopCamera;
 
+
 function drawVisibleVideoToPhoto(){
-  const wrap=$("cameraWrap").getBoundingClientRect(),targetAspect=wrap.width/wrap.height;
+  const wrap=$("cameraWrap").getBoundingClientRect(),targetAspect=CANON_ASPECT;
   const vw=video.videoWidth,vh=video.videoHeight;if(!vw||!vh)throw new Error("カメラ映像が未準備です");
   let sx=0,sy=0,sw=vw,sh=vh;const srcAspect=vw/vh;
   if(srcAspect>targetAspect){sw=vh*targetAspect;sx=(vw-sw)/2}
   else{sh=vw/targetAspect;sy=(vh-sh)/2}
-  const outW=Math.min(1100,Math.round(sw)),outH=Math.round(outW/targetAspect);
-  photo.width=outW;photo.height=outH;
-  pctx.drawImage(video,sx,sy,sw,sh,0,0,outW,outH);
+  photo.width=CANON_W;photo.height=CANON_H;
+  pctx.clearRect(0,0,CANON_W,CANON_H);
+  pctx.drawImage(video,sx,sy,sw,sh,0,0,CANON_W,CANON_H);
   photo.style.display="block";
 }
+function drawAnyImageToCanonical(img){
+  const iw=img.naturalWidth||img.videoWidth||img.width, ih=img.naturalHeight||img.videoHeight||img.height;
+  let sx=0,sy=0,sw=iw,sh=ih; const srcAspect=iw/ih;
+  if(srcAspect>CANON_ASPECT){sw=ih*CANON_ASPECT; sx=(iw-sw)/2;}
+  else{sh=iw/CANON_ASPECT; sy=(ih-sh)/2;}
+  photo.width=CANON_W; photo.height=CANON_H;
+  pctx.clearRect(0,0,CANON_W,CANON_H);
+  pctx.drawImage(img,sx,sy,sw,sh,0,0,CANON_W,CANON_H);
+  photo.style.display="block";
+}
+
 function showCaptureFlash(){
   const f=$("captureFlash");f.classList.add("on");
   if(navigator.vibrate)try{navigator.vibrate(35)}catch(_){}
@@ -147,10 +160,8 @@ file.addEventListener("change",e=>{
   const f=e.target.files&&e.target.files[0];if(!f)return;
   const img=new Image(),url=URL.createObjectURL(f);setStatus("画像を読み込み中…","info");
   img.onload=async()=>{
-    const s=Math.min(1,1100/img.naturalWidth);
-    photo.width=Math.round(img.naturalWidth*s);photo.height=Math.round(img.naturalHeight*s);
-    pctx.drawImage(img,0,0,photo.width,photo.height);photo.style.display="block";URL.revokeObjectURL(url);
-    $("message").textContent=`画像 ${img.naturalWidth}×${img.naturalHeight} を解析します`;
+    drawAnyImageToCanonical(img);URL.revokeObjectURL(url);
+    $("message").textContent=`画像 ${img.naturalWidth}×${img.naturalHeight} を 900×1200 に正規化して解析します`;
     await analyze();
   };
   img.onerror=()=>setStatus("画像を読み込めませんでした","ng");img.src=url;
@@ -454,12 +465,7 @@ function classifyNormalized(canvas){
   ctx.lineWidth=7;ctx.strokeStyle=accepted?"#e00000":"#f59e0b";ctx.strokeRect(bx0+7,brow.y0+7,bx1-bx0-14,brow.y1-brow.y0-14);ctx.restore();
   return{name:accepted?best.name:null,best,second,gap,vals,labelGeometry:geo,rowGeometry:rows};
 }
-function confidenceText(r){
-  if(!r||!r.best)return"";
-  if(!r.name)return`候補 ${r.best.name} / 確信度不足`;
-  const ratio=r.second.score>0?r.best.score/r.second.score:9;
-  return`信頼度目安 ${Math.round(clamp(65+(r.best.score-.05)*120+Math.min(20,(ratio-1)*12),65,99))}%`;
-}
+function confidenceText(r){ return ""; }
 function drawMessageCanvas(canvas,title,sub,bg="#fff7d6"){
   canvas.width=600;canvas.height=500;const ctx=canvas.getContext("2d");
   ctx.fillStyle=bg;ctx.fillRect(0,0,600,500);ctx.fillStyle="#111";ctx.textAlign="center";ctx.textBaseline="middle";
@@ -665,7 +671,7 @@ async function ocrBandType(imgData,band,x0,x1){
   try{
     const res=await worker.recognize(sheet);
     const text=res?.data?.text||"",confidence=Math.round(res?.data?.confidence||0),parsed=parseBandTextType(text);
-    return {type:parsed.type,text:text.trim(),confidence,parsed,reason:parsed.type?`OCR ${parsed.type} ${confidence}%`:`OCR曖昧 ${confidence}%`};
+    return {type:parsed.type,text:text.trim(),confidence,parsed,reason:parsed.type?`OCR ${parsed.type}`:`OCR要確認`};
   }catch(e){
     console.warn("OCR failed",e);
     return{type:null,text:"",confidence:0,reason:"OCR失敗"};
@@ -728,8 +734,8 @@ async function analyze(){
   const rR=await one(tR,bandR,primerFallbackR,normR,mid,photo.width);
 
   $("left").textContent=rL.name||"?"; $("right").textContent=rR.name||"?";
-  $("leftScore").textContent=rL.primer?rL.reason:rL.uncertain?rL.reason:confidenceText(rL);
-  $("rightScore").textContent=rR.primer?rR.reason:rR.uncertain?rR.reason:confidenceText(rR);
+  $("leftScore").textContent=rL.uncertain?"要確認":(rL.primer?"":"");
+  $("rightScore").textContent=rR.uncertain?"要確認":(rR.primer?"":"");
 
   const desc=r=>r.primer||r.uncertain
     ?`${r.name||"要確認"} / ${r.reason}${r.ocr?` / OCR=${(r.ocr.text||"-").replace(/\s+/g," ")}`:""}`
