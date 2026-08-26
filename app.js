@@ -7,6 +7,44 @@ const normL=$("normL"),normR=$("normR"),bar=$("bar");
 const startCameraBtn=$("startCamera"),captureBtn=$("capture"),stopCameraBtn=$("stopCamera");
 let stream=null;
 
+function detectDeviceProfile(){
+  const ua=navigator.userAgent||"";
+  const uaL=ua.toLowerCase();
+  const isiPhone=/iphone/.test(uaL);
+  const isiPad=/ipad/.test(uaL) || (/macintosh/.test(uaL) && (navigator.maxTouchPoints||0)>1);
+  const isAndroid=/android/.test(uaL);
+  const shortCss=Math.min(screen.width||0, screen.height||0);
+  const dpr=window.devicePixelRatio||1;
+  const shortPx=Math.round(shortCss*dpr);
+  const isTablet=(isAndroid && shortCss>=600) || isiPad;
+  let kind='other';
+  if(isiPhone) kind='iphone';
+  else if(isiPad) kind='ipad';
+  else if(isAndroid && isTablet) kind='android_tablet';
+  else if(isAndroid) kind='android_phone';
+  const tiltEnabled=(kind==='android_tablet');
+  return {
+    ua, kind, isAndroid, isiPhone, isiPad, isTablet, shortCss, shortPx, dpr,
+    tiltEnabled, leftTilt: tiltEnabled?10:0, rightTilt: tiltEnabled?-10:0
+  };
+}
+let DEVICE_PROFILE=detectDeviceProfile();
+let DIAG={source:'-', videoW:0, videoH:0, trackW:0, trackH:0, cropW:0, cropH:0, analysisW:0, analysisH:0, fileW:0, fileH:0};
+function updateDiag(){
+  const el=$("diag"); if(!el) return;
+  DEVICE_PROFILE=detectDeviceProfile();
+  el.textContent=[
+    `device=${DEVICE_PROFILE.kind}`,
+    `tiltEnabled=${DEVICE_PROFILE.tiltEnabled?'yes':'no'}  leftTilt=${DEVICE_PROFILE.leftTilt}  rightTilt=${DEVICE_PROFILE.rightTilt}`,
+    `screen=${DEVICE_PROFILE.shortCss}px short-side  dpr=${DEVICE_PROFILE.dpr}  shortPx=${DEVICE_PROFILE.shortPx}`,
+    `source=${DIAG.source}`,
+    `live=${DIAG.videoW||'-'}x${DIAG.videoH||'-'}  track=${DIAG.trackW||'-'}x${DIAG.trackH||'-'}`,
+    `crop=${DIAG.cropW||'-'}x${DIAG.cropH||'-'}  analysis=${DIAG.analysisW||'-'}x${DIAG.analysisH||'-'}`,
+    `file=${DIAG.fileW||'-'}x${DIAG.fileH||'-'}`,
+    `ua=${DEVICE_PROFILE.ua}`
+  ].join('\n');
+}
+
 const NAMES_L=["C","M","Y","K"],NAMES_R=["W","CL","LC","LM"];
 const LH_TEMPLATE="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAABQCAAAAAACIqegAAAErElEQVR4AeXBC5LkuBEFwYj7H/qpgMz6kLsEaBqNWbXaXX4Z+WXkl5FfRn4Z+WXk5wuD3CI/XxjkFvnpwpPcID9ceJM9+SkCyFn4JFvyI4Qn+RCOZEt+gPBB3sKJ7Mg3CQ9yEj7JSziTHfkeochROJCnUIRQZEO+RyhyEE6khUmGMMiGfI9Q5CCcSAuTDGGQDfkeochBOJEWJhnCIBvyNUKTT6EIockUJpnCIGvyd4VBbghNPoVJHkKRIUxSwiBr8heFJ9kKT/IpTDKEIg9hkhIGWZP/mchZaLITXuQtFJlCkYcwSQmDrMkfC03OQpOd8CJvoUgJkzyESUoYZE3+WHiSk9BkLXyQt1CkhCIQJmlhkCX5c6HJSWiyFj7JSyhSQhEIk7QwyJLsBWQhNDkJTVbCkbyEIiUUgTBJC4MsyV5AFkKTk9BkJRzJSyhSQhEIk7QwyJKshCYLoclJaLIQTuQlFGlhEgiTtDDIkqyEJguhyUloshBO5CUUaWESCEVKGGRJVkKThdDkJDRZCCfyEoq0UIRQpIRBlmQlPMm10OQsFFkIkxAmeQlFWigCYZISBlmStVDkWniSk9DkWhgEwiQvoUgLRSBMUsIgS7IWiiyEJiehybXwIA9hkpdQpIUiECYpYZAlWQtFFkKTk9DkWgAZwiQvoUgLRSBMUsIgS7IWiiyEJiehybUgJRR5CkVaKAJhkhYeZEnWQpGF0OQkNLkjFHkKRVooAmGSFgZZkbVQZCE0OQlN7ghFnkKRFopAmKSFQVZkLTzJpdDkJDS5JUzyFiYpoQiEIiUMsiJr4UkuhSYnocktYZK3MEkJRSAUKWGQFdkITS6FJ5nCP8gdYZK3MEkLkzyESUoYZEU2QpNLYU/uCJO8hUlamOQhTFLCgyzJRmhyLWzJHWGStzBJC5M8hElKeJAl2QhNroUtuSNM8hYmaWGSh1BkCg+yJBuhybWwJXeEST6EQVqYZAqDDGGQJdkIT3IpbMkdoclLmKSESaYwyBAGWZKN8CSXwpbcEZq8hElKmGQKgwxhkCXZCU0uhS25JRR5CZOUMMkUJnkIgyzJTmhyKfwrITS5JRR5CZOUMEkJk4RJ1mQnNLkU3uQgFLklFHkLRR5CkRKOZE12QpNLoclZaHJHKPIWijyEIi0cyJrshCYLochJaHJHKPIWmhCKPIVPsiE7oclCKHISmtwRinwI/yAv4YNsyE5oshCKnIQmd4QiH8I/yFt4kR3ZCU9yLRQ5CU3uCE0+hBP5FIrsyU54kmuhyElockdo8ikcyUlA7pCd8CTXQpGT0OSO0ORTOJKTgNwhW6HJtVDkJDS5JRT5FA7kvyZbocm1UOQsFLklFDkKL/IHZCs0WQhNjkKTO0KRk1Dkj8hWaLIQmhyFJneEIn+HbIUmC6HJUWhyRyjyd8hWeJJroclRaHJHAPl7ZCs8ybXQ5Cg0+QayF5p8CE2G0OQoNPkGsheWZAhNTkKRbyB7YUmG0OQkFPkGsheWZApNjkKRbyB7YUmm0OQoPMiXkL2wJFNo8s1kLyzJFJp8M9kLS/KTyF64Ij+O3BAO5AeTG8KD/F+QX0Z+Gfll5JeRX0Z+mf8AzQdpYBKRD2YAAAAASUVORK5CYII=";
 const PR_TEMPLATE="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAABQCAAAAAACIqegAAAFbElEQVR4AeXBC5JbORIEwYj7HzpHbBQK4OeBzR0b00rtLj+M/DDyw8gPIz+M/DDylwkbeSJ/mbCRJ/JXCQ/kgfwxQpEr4Ynckz9DuCOvhBfkjvx+YZAr4ZE8CRdkI79fGORKeCRPwgXZyG8V7skr4Zk8CFdkI79TeCKPwktyL1ySRX6b8JLcC1dkExaBsMgi/7PwgnxXuCK7cEU2oclNWKTJx8KRfEu4Jku4Ji00GUKTJh8LR/It4Zos4Zq00GQITZos4RW5E96R7wjXZAlNfgmLtFCkhUmalHBJNuE9eSucSAuTfAlNWijSwiRNSjiRKXyDvBMWuQmLTKHJEJqUMEkLTSYp4UhK+A55IzQZQpMpFJlCkxImaaHJJCUcSQnfIWdhkhaaDGGSFiYpYZIWmkxSwpGU8B1yFiZpockQJmlhkhImaaHJJC2cyBC+Q85CkSU0GcIkLUxSwiSbUGSSFk5kCE3uhI0chSJLaDKESVpoMoRJNqHIJC0cSQmDPAiLHIUiS2gyhElaaDKEIrtQZJIWBmlhkRIGeRSaHIUiS2gyhCJLaHITmiyhySQtDNLCIiUM8ig0OQpFltBkCEWW0OQmNFlCk0laGGQJTUoY5FFo8rnQZAhFltDkJjTZhSKTtDDILhQpYZBnocjnQpOb0GQJTW5Ck10oMkkLg9wJg5QwyLNQ5HNhki+hyRKa3IQmu1BkkhYGuROKDGGQZ6HIx0KTL6HJEprchCa7MEmRFga5E4oMYZBHocnHQpMvockSmtyEJrswSZEWBrkTigxhkEehycdCky+hyRKa3IQmuzBJkRYGuROKDGGQR6HJp8IiX0KTJTS5CU12YZIiLQxyJxQZwiCPwiQfC02G0GQXityEJrswSZEWBrkTigxhkHthkU+FRYbQZAlNbkKTXSgySQuD7EKREgZp4YF8KCxSQpMlNLkJTXahyCQtDLILRUp4Sz4TFmmhyRKaDKHILhSZpIVBdqFICW/JZ8IiLTRZQpMhFNmFIpO0MEgLi5TwjnwmbKSFJrtQZAhFdqHIJC0UCc+khDP5UNjIEprsQpEhFNmFIpO0cCJTOJIPhY1sQpNdKDKEIrtQZJIWTmQKJ/KpsJFNaLILRYZQZAlNJmnhRKZwIp8KG9mEJrtQZAhFltBkkhYOpIVr8qmwk11YZBOKDKHIEppM0sI1WcIV+VjYyYMwSQtNhjBJC5M0aeGK7EKRm7CTj4SNPAmTtNBkCJO0MEmTFi7InVCkhEU+EDbyLEzSwiQlTDKFJk2W8Io8CEWmsMi3hY28ECZpYZIpFJlCkyZLeEUehCJTWOTbwkZeCJO0MMkUikyhSZMlDHIUikxhkW8Li7wSJmlhkik0GcIkiyzhi5yFIi0s8j1hIy+FRYbQZApNvoQmiyzhi5yFIpuwyDeERa6EJkNo0kKTX0KTjSzhi5yFIpuwkffCIlfCIjehyRIuyUaWMMhRKLILi7wVFrkUFvklLLKEC3JHljDIUSiyC4u8FRa5FBb5JSyyhAtyR5YwyFEosgsbeSecyBQuyS68JPdkCYMchSJ3wiJvhCOZwiW5E16Re7KEQY5CkTthI2fhSFp4TZ6ER/JIljDIUShyLyxyFM5kCa/IC+GePJElDHIUitwLixyFM1nCK/JCuCdPZAmDHIUiD8IiJ+FMduGJvBYWeUGWMMhRKPIgLHISzuROeCAnkUuyhEGOQpEnYZFr4R3ZhY38C7KEQc7CIE/CIlfCO/Is3Mi/I0sY5CgUeRYWuRAuyX9MljDIUSjyLCxyIVyS/5gsYZCzMMgLocmlgPwWsoRBzsIgL4Qm/4dkCYOchS/yJ5JN5K8nP4z8MPLDyA8jP4z8MP8A/CayYHDbmTcAAAAASUVORK5CYII=";
@@ -80,6 +118,10 @@ async function startCamera(){
       video:{facingMode:{ideal:"environment"},width:{ideal:1600},height:{ideal:1200},aspectRatio:{ideal:CANON_ASPECT}}
     });
     video.srcObject=stream;await video.play();
+    const tr=stream.getVideoTracks()[0]; const st=tr&&tr.getSettings?tr.getSettings():{};
+    DIAG.source="camera"; DIAG.videoW=video.videoWidth; DIAG.videoH=video.videoHeight;
+    DIAG.trackW=st.width||0; DIAG.trackH=st.height||0; DIAG.fileW=0; DIAG.fileH=0;
+    updateDiag();
     $("cameraPlaceholder").style.display="none";
     $("captureState").classList.remove("on");
     $("retake").classList.remove("show");
@@ -106,6 +148,10 @@ function drawVisibleVideoToPhoto(){
   pctx.clearRect(0,0,CANON_W,CANON_H);
   pctx.drawImage(video,sx,sy,sw,sh,0,0,CANON_W,CANON_H);
   photo.style.display="block";
+  const tr=stream?.getVideoTracks?.()[0]; const st=tr&&tr.getSettings?tr.getSettings():{};
+  DIAG.source="camera"; DIAG.videoW=vw; DIAG.videoH=vh; DIAG.trackW=st.width||0; DIAG.trackH=st.height||0;
+  DIAG.cropW=Math.round(sw); DIAG.cropH=Math.round(sh); DIAG.analysisW=CANON_W; DIAG.analysisH=CANON_H;
+  updateDiag();
 }
 function drawAnyImageToCanonical(img){
   const iw=img.naturalWidth||img.videoWidth||img.width, ih=img.naturalHeight||img.videoHeight||img.height;
@@ -116,6 +162,9 @@ function drawAnyImageToCanonical(img){
   pctx.clearRect(0,0,CANON_W,CANON_H);
   pctx.drawImage(img,sx,sy,sw,sh,0,0,CANON_W,CANON_H);
   photo.style.display="block";
+  DIAG.source="file"; DIAG.fileW=iw; DIAG.fileH=ih; DIAG.analysisW=CANON_W; DIAG.analysisH=CANON_H;
+  DIAG.videoW=0; DIAG.videoH=0; DIAG.trackW=0; DIAG.trackH=0; DIAG.cropW=Math.round(sw); DIAG.cropH=Math.round(sh);
+  updateDiag();
 }
 
 function showCaptureFlash(){
@@ -777,7 +826,16 @@ function rectangleQuad(x0,x1,y0,y1){
     {x:x1,y:y1},{x:x0,y:y1}
   ];
 }
-function classifyByColorRows(canvas){
+function tiltedQuad(x0,x1,y0,y1,tiltPx){
+  const maxTilt=Math.min(16, Math.max(-16, tiltPx));
+  return [
+    {x:x0,y:y0-maxTilt/2},
+    {x:x1,y:y0+maxTilt/2},
+    {x:x1,y:y1+maxTilt/2},
+    {x:x0,y:y1-maxTilt/2}
+  ];
+}
+function classifyByColorRows(canvas,bottleSide="L",deviceProfile=DEVICE_PROFILE){
   const ctx=canvas.getContext("2d",{willReadFrequently:true});
   const {g,W,H}=grayscale(canvas);
 
@@ -821,13 +879,16 @@ function classifyByColorRows(canvas){
 
   if(leftX1-leftX0<35||rightX1-rightX0<35)return null;
 
+  const sideTilt=bottleSide==="L" ? deviceProfile.leftTilt : deviceProfile.rightTilt;
   const vals=[];
   for(let r=0;r<4;r++){
     const y0=Math.max(10,rowCenters[r]-rowHalf);
     const y1=Math.min(H-10,rowCenters[r]+rowHalf);
 
-    const qL=rectangleQuad(leftX0,leftX1,y0,y1);
-    const qR=rectangleQuad(rightX0,rightX1,y0,y1);
+    // Fixed weak tilt per bottle side:
+    // left bottle = slightly down to the right, right bottle = slightly up to the right.
+    const qL=tiltedQuad(leftX0,leftX1,y0,y1,sideTilt*0.8);
+    const qR=tiltedQuad(rightX0,rightX1,y0,y1,sideTilt);
 
     vals.push({name:NAMES_L[r],row:r,side:"L",quad:qL,...scoreQuad(g,W,H,qL)});
     vals.push({name:NAMES_R[r],row:r,side:"R",quad:qR,...scoreQuad(g,W,H,qR)});
@@ -856,23 +917,12 @@ function classifyByColorRows(canvas){
 
   // Green: broad search strips. These are NOT grid boxes.
   ctx.strokeStyle="#16a34a";
-  for(let r=0;r<4;r++){
-    const y0=rowCenters[r]-rowHalf,y1=rowCenters[r]+rowHalf;
-    ctx.strokeRect(leftX0,y0,leftX1-leftX0,y1-y0);
-    ctx.strokeRect(rightX0,y0,rightX1-rightX0,y1-y0);
-  }
+  for(const v of vals)drawQuad(ctx,v.quad,.03);
 
   // Red/orange: selected row + side.
-  const bx0=best.side==="L"?leftX0:rightX0;
-  const bx1=best.side==="L"?leftX1:rightX1;
   ctx.lineWidth=7;
   ctx.strokeStyle=accepted?"#e00000":"#f59e0b";
-  ctx.strokeRect(
-    bx0+6,
-    rowCenters[best.row]-rowHalf+6,
-    bx1-bx0-12,
-    rowHalf*2-12
-  );
+  drawQuad(ctx,best.quad,.10);
   ctx.restore();
 
   return {
@@ -882,7 +932,9 @@ function classifyByColorRows(canvas){
     colorLeft,colorRight,
     leftZone:[leftX0,leftX1],
     rightZone:[rightX0,rightX1],
-    labelRight
+    labelRight,
+    bottleSide,
+    sideTilt
   };
 }
 
@@ -1166,7 +1218,7 @@ async function analyze(){
 
   setProgress(35);setStatus("色・PRIMERを判定中…","info");await sleep(20);
 
-  async function one(t,band,fallback,canvas,sideX0,sideX1,sourceCanvas){
+  async function one(t,band,fallback,canvas,sideX0,sideX1,sourceCanvas,bottleSide){
     if(t){
       const raw=document.createElement("canvas"); normalizeTable(sourceCanvas,t,raw);
       const k=estimateShear(raw);
@@ -1179,7 +1231,7 @@ async function analyze(){
       canvas.width=sheared.width;canvas.height=sheared.height;
       canvas.getContext("2d",{willReadFrequently:true}).drawImage(sheared,0,0);
 
-      const rowResult=classifyByColorRows(canvas);
+      const rowResult=classifyByColorRows(canvas,bottleSide,DEVICE_PROFILE);
       if(rowResult){
         rowResult.shear=k;
         rowResult.mode=t.mode;
@@ -1220,8 +1272,8 @@ async function analyze(){
     return {name:null,uncertain:true,reason:`帯文字曖昧 LH=${band.lh.toFixed(2)} PR=${band.pr.toFixed(2)} / 色マス=${fallback.colorCount} / 明るさ=${fallback.q.mean.toFixed(0)}`,ocr};
   }
 
-  const rL=await one(tL,bandL,primerFallbackL,normL,0,mid,sideL);
-  const rR=await one(tR,bandR,primerFallbackR,normR,mid,photo.width,sideR);
+  const rL=await one(tL,bandL,primerFallbackL,normL,0,mid,sideL,"L");
+  const rR=await one(tR,bandR,primerFallbackR,normR,mid,photo.width,sideR,"R");
 
   $("left").textContent=rL.name||"?"; $("right").textContent=rR.name||"?";
   $("leftScore").textContent=rL.uncertain?"要確認":(rL.primer?"":"");
@@ -1229,7 +1281,7 @@ async function analyze(){
 
   const desc=r=>r.primer||r.uncertain
     ?`${r.name||"要確認"} / ${r.reason}${r.ocr?` / OCR=${(r.ocr.text||"-").replace(/\s+/g," ")}`:""}`
-    :`${r.best.name} / 2位=${r.second.name} / 方式=${r.rectifyMode||"-"} / 斜線=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
+    :`${r.best.name} / 2位=${r.second.name} / 方式=${r.rectifyMode||"-"} / device=${DEVICE_PROFILE.kind} / side=${r.bottleSide||"-"} tilt=${r.sideTilt||0} / 斜線=${(r.best.diag||0).toFixed(2)} / band LH=${r.band?.lh?.toFixed?.(2)||"-"} PR=${r.band?.pr?.toFixed?.(2)||"-"}`;
   $("debugText").textContent=`左: ${desc(rL)}　右: ${desc(rR)}`;
 
   setProgress(100);
@@ -1238,5 +1290,6 @@ async function analyze(){
   else setStatus("ERROR","ng");
 }
 
+updateDiag();
 $("debugBtn").onclick=()=>$("debug").classList.toggle("on");
 })();
