@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>インクチェック判定 v3.3</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f4f6;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.wrap{max-width:920px;margin:auto;padding:12px}
+h1{font-size:24px;margin:5px 0}
+.sub,.small{font-size:13px;color:#666;line-height:1.55}
+.card{background:#fff;border-radius:16px;padding:13px;margin:11px 0;box-shadow:0 2px 10px #00000012}
+.btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:800;text-align:center;cursor:pointer;margin-top:8px}
+.primary{background:#111;color:#fff}.secondary{background:#e5e7eb;color:#111}
+input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+
+.cameraWrap{position:relative;width:100%;aspect-ratio:3/4;background:#111;border-radius:14px;overflow:hidden;margin-top:10px}
+#video{width:100%;height:100%;object-fit:cover;display:block}
+#cameraPlaceholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#ddd;text-align:center;padding:30px}
+
+.guideLayer{position:absolute;inset:0;pointer-events:none}
+.guideText{position:absolute;left:4%;right:4%;top:1.8%;text-align:center;color:#fff;font-size:13px;font-weight:900;text-shadow:0 1px 4px #000}
+.midLine{position:absolute;left:50%;top:7%;bottom:6%;border-left:1px dashed rgba(255,255,255,.28)}
+.bottle{
+ position:absolute;top:7%;width:44%;height:87%;
+ border:2px solid rgba(255,255,255,.72);
+ border-radius:20% 20% 10% 10%;
+ background:rgba(255,255,255,.018)
+}
+.bottle.left{left:3%}.bottle.right{right:3%}
+.cap{
+ position:absolute;left:30%;top:0%;width:40%;height:12%;
+ border:1px dashed rgba(255,255,255,.34);border-radius:10% 10% 4% 4%
+}
+.label{
+ position:absolute;left:8%;top:30%;width:84%;height:45%;
+ border:2px dashed rgba(255,255,255,.48);border-radius:4px
+}
+/* 帯は位置合わせ必須にしない。ラベル内の目安だけ。 */
+.band{
+ position:absolute;left:35%;top:15%;width:58%;height:9%;
+ border:1px dashed rgba(255,205,70,.72);
+ background:rgba(201,151,23,.12);border-radius:3px
+}
+.band span{position:absolute;left:2px;right:2px;top:50%;transform:translateY(-50%);text-align:center;color:#ffeca4;font-size:8px;font-weight:900;text-shadow:0 1px 3px #000}
+/* 実寸 35mm / ボトル約100mm = 35% */
+.table{
+ position:absolute;left:8%;top:44%;width:36%;height:32%;
+ display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr);
+ opacity:.34
+}
+.table div{border:1px solid #fff;color:#fff;font-size:7px;display:flex;align-items:center;justify-content:center;font-weight:900;text-shadow:0 1px 2px #000}
+.labelText{position:absolute;left:0;right:0;bottom:-21px;color:rgba(255,255,255,.82);font-size:9px;text-align:center;font-weight:800;text-shadow:0 1px 2px #000}
+.scaleNote{position:absolute;left:0;right:0;bottom:1.5%;text-align:center;color:rgba(255,255,255,.76);font-size:10px;font-weight:700;text-shadow:0 1px 3px #000}
+
+
+.captureFlash{position:absolute;inset:0;background:white;opacity:0;pointer-events:none;transition:opacity .18s;z-index:8}
+.captureFlash.on{opacity:.82}
+.captureState{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9;background:rgba(0,0,0,.78);color:#fff;border-radius:999px;padding:12px 18px;font-size:18px;font-weight:900;display:none;white-space:nowrap}
+.captureState.on{display:block}
+#retake{display:none}
+#retake.show{display:block}
+#photo{display:none;width:100%;height:auto;border-radius:12px;margin-top:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.results{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.box{background:#f7f7f7;border-radius:12px;padding:12px;text-align:center}
+.name{font-size:36px;font-weight:900;line-height:1.15;margin:4px 0}
+.status{margin-top:10px;padding:17px;border-radius:14px;text-align:center;font-size:29px;font-weight:900;background:#eee}
+.ok{background:#dcfce7}.ng{background:#fee2e2}.warn{background:#fef3c7}.info{background:#dbeafe}
+.progress{height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;margin-top:9px}
+.progress>div{height:100%;width:0;background:#111;transition:width .15s}
+.debug{display:none;margin-top:10px}.debug.on{display:block}
+.debug-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.debug canvas{width:100%;height:auto;border-radius:10px;background:#eee}
+
+@media (min-width:700px){
+  .cameraWrap{
+    width:min(520px,100%);
+    margin:10px auto 0;
+  }
+  #photo{
+    width:min(520px,100%);
+    margin:10px auto 0;
+  }
+}
+
+
+.diag{background:#111;color:#fff;border-radius:14px;padding:12px;margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>インクチェック判定</h1>
+<div class="sub">v3.3 / 端末判定切替 / 解析付き</div>
+
+<div class="card">
+  <button id="startCamera" class="btn primary" type="button">カメラを起動</button>
+
+  <div id="cameraWrap" class="cameraWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="cameraPlaceholder">GitHub Pagesで開いて<br>「カメラを起動」を押してください</div>
+
+    <div class="guideLayer">
+      <div class="guideText">左右に別々のボトルを1本ずつ。枠は目安なので、だいたい入っていればOK</div>
+      <div class="midLine"></div>
+
+      <div class="bottle left">
+        <div class="cap"></div>
+        <div class="label">
+          <div class="band"><span>LH-100 / PR-200 帯の目安</span></div>
+          <div class="table">
+            <div>C</div><div></div><div>W</div><div></div>
+            <div>M</div><div></div><div>CL</div><div></div>
+            <div>Y</div><div></div><div>LC</div><div></div>
+            <div>K</div><div></div><div>LM</div><div></div>
+          </div>
+          <div class="labelText">白ラベルはこの辺りへ</div>
+        </div>
+      </div>
+
+      <div class="bottle right">
+        <div class="cap"></div>
+        <div class="label">
+          <div class="band"><span>LH-100 / PR-200 帯の目安</span></div>
+          <div class="table">
+            <div>C</div><div></div><div>W</div><div></div>
+            <div>M</div><div></div><div>CL</div><div></div>
+            <div>Y</div><div></div><div>LC</div><div></div>
+            <div>K</div><div></div><div>LM</div><div></div>
+          </div>
+          <div class="labelText">白ラベルはこの辺りへ</div>
+        </div>
+      </div>
+
+      <div class="scaleNote">ガイドは目安です。多少のズレはOK。傾き補正は端末判定で自動切替します</div>
+    </div>
+    <div id="captureFlash" class="captureFlash"></div>
+    <div id="captureState" class="captureState">撮影しました・判定中…</div>
+  </div>
+
+  <button id="capture" class="btn primary" type="button" disabled>この状態で撮影・判定</button>
+  <div class="row">
+    <label class="btn secondary" for="file">既存写真で判定</label>
+    <button id="stopCamera" class="btn secondary" type="button" disabled>カメラ停止</button>
+  </div>
+  <button id="retake" class="btn secondary" type="button">撮り直す</button>
+  <input id="file" type="file" accept="image/*">
+
+  <canvas id="photo"></canvas>
+  <div id="message" class="small" style="margin-top:8px">
+    黄土色帯は補助情報です。2本とも帯を完全に正面へ向ける必要はありません。
+  </div>
+  <div class="progress"><div id="bar"></div></div>
+</div>
+
+<div class="card">
+  <div class="results">
+    <div class="box">左<div id="left" class="name">-</div><div id="leftScore" class="small"></div></div>
+    <div class="box">右<div id="right" class="name">-</div><div id="rightScore" class="small"></div></div>
+  </div>
+  <div id="status" class="status">カメラを起動してください</div>
+</div>
+
+
+<div class="card">
+  <b>端末診断</b>
+  <div class="small">自動判定された端末種別と、現在の傾き補正設定です。</div>
+  <div id="diag" class="diag">読込中…</div>
+</div>
+<div class="card">
+  <button id="debugBtn" class="btn secondary" type="button">認識画像を確認</button>
+  <div id="debug" class="debug">
+    <div class="debug-grid">
+      <div><div class="small">左</div><canvas id="normL" width="600" height="500"></canvas></div>
+      <div><div class="small">右</div><canvas id="normR" width="600" height="500"></canvas></div>
+    </div>
+    <div id="debugText" class="small" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<div class="card small">
+<b>PRIMERの扱い</b><br>
+通常インクはC/M/Y/Kの色マスで4行を確定し、罫線の位置を使わずにチェックマークを探します。v3.3では端末を自動判定し、iPhone / iPad系は傾き補正なし、Androidタブレット系のみ左ボトルを少し右肩下がり・右ボトルを少し右肩上がりとして探索します。解析画面と端末診断は残しています。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は900×1200へ正規化した後、左右のボトルを別々に拡大してチェック表を探します。
+</div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
