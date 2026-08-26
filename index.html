@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>インクチェック判定 v3.1</title>
+<title>インクチェック判定 v3.3</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f3f4f6;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -86,12 +86,15 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
   }
 }
 
+
+.diag{background:#111;color:#fff;border-radius:14px;padding:12px;margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>インクチェック判定</h1>
-<div class="sub">v3.1 / C・M・Y・K行基準 / 罫線非依存</div>
+<div class="sub">v3.3 / 端末判定切替 / 解析付き</div>
 
 <div class="card">
   <button id="startCamera" class="btn primary" type="button">カメラを起動</button>
@@ -132,7 +135,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
         </div>
       </div>
 
-      <div class="scaleNote">ガイドは目安です。多少のズレ・傾きは自動補正します</div>
+      <div class="scaleNote">ガイドは目安です。多少のズレはOK。傾き補正は端末判定で自動切替します</div>
     </div>
     <div id="captureFlash" class="captureFlash"></div>
     <div id="captureState" class="captureState">撮影しました・判定中…</div>
@@ -161,6 +164,12 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
   <div id="status" class="status">カメラを起動してください</div>
 </div>
 
+
+<div class="card">
+  <b>端末診断</b>
+  <div class="small">自動判定された端末種別と、現在の傾き補正設定です。</div>
+  <div id="diag" class="diag">読込中…</div>
+</div>
 <div class="card">
   <button id="debugBtn" class="btn secondary" type="button">認識画像を確認</button>
   <div id="debug" class="debug">
@@ -174,7 +183,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 
 <div class="card small">
 <b>PRIMERの扱い</b><br>
-通常インクはC/M/Y/Kの色マスで4行を確定し、罫線の位置を使わずにチェックマークを探します。LC/LMの境界線が斜めに見えても、チェックの中心がどの色マス行に最も近いかで判定します。撮影ガイドは目安で、多少ズレても左右それぞれを広く探します。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は900×1200へ正規化した後、左右のボトルを別々に拡大してチェック表を探します。
+通常インクはC/M/Y/Kの色マスで4行を確定し、罫線の位置を使わずにチェックマークを探します。v3.3では端末を自動判定し、iPhone / iPad系は傾き補正なし、Androidタブレット系のみ左ボトルを少し右肩下がり・右ボトルを少し右肩上がりとして探索します。解析画面と端末診断は残しています。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は900×1200へ正規化した後、左右のボトルを別々に拡大してチェック表を探します。
 </div>
 </div>
 <script src="app.js"></script>
