@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>インクチェック判定 v3.3</title>
+<title>インクチェック判定 v3.4</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f3f4f6;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -89,12 +89,19 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 
 .diag{background:#111;color:#fff;border-radius:14px;padding:12px;margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 
+
+.correct-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.correct-label{display:block;font-size:13px;font-weight:800;color:#444}
+.correct-select{width:100%;margin-top:5px;border:1px solid #d1d5db;border-radius:10px;background:#fff;padding:12px;font-size:18px;font-weight:800}
+.sendNote{margin-top:8px;font-size:13px;color:#666;line-height:1.5}
+.sendDone{color:#166534;font-weight:800}.sendError{color:#b91c1c;font-weight:800}
+
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>インクチェック判定</h1>
-<div class="sub">v3.3 / 端末判定切替 / 解析付き</div>
+<div class="sub">v3.4 / 結果送信 / 解析画像保存</div>
 
 <div class="card">
   <button id="startCamera" class="btn primary" type="button">カメラを起動</button>
@@ -142,10 +149,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
   </div>
 
   <button id="capture" class="btn primary" type="button" disabled>この状態で撮影・判定</button>
-  <div class="row">
-    <label class="btn secondary" for="file">既存写真で判定</label>
-    <button id="stopCamera" class="btn secondary" type="button" disabled>カメラ停止</button>
-  </div>
+  <label class="btn secondary" for="file">既存写真で判定</label>
   <button id="retake" class="btn secondary" type="button">撮り直す</button>
   <input id="file" type="file" accept="image/*">
 
@@ -165,6 +169,32 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 </div>
 
 
+
+<div class="card">
+  <b>結果を送信</b>
+  <div class="small">判定が合っていれば、そのまま送信。間違っている時だけ正しい色へ変更してください。</div>
+  <div class="correct-grid">
+    <label class="correct-label">左の正解
+      <select id="leftCorrect" class="correct-select">
+        <option value="">選択</option>
+        <option>C</option><option>M</option><option>Y</option><option>K</option>
+        <option>W</option><option>CL</option><option>LC</option><option>LM</option>
+        <option>PRIMER</option>
+      </select>
+    </label>
+    <label class="correct-label">右の正解
+      <select id="rightCorrect" class="correct-select">
+        <option value="">選択</option>
+        <option>C</option><option>M</option><option>Y</option><option>K</option>
+        <option>W</option><option>CL</option><option>LC</option><option>LM</option>
+        <option>PRIMER</option>
+      </select>
+    </label>
+  </div>
+  <button id="sendResult" class="btn primary" type="button" disabled>結果を送信</button>
+  <div id="sendMessage" class="sendNote">判定後に送信できます。</div>
+</div>
+
 <div class="card">
   <b>端末診断</b>
   <div class="small">自動判定された端末種別と、現在の傾き補正設定です。</div>
@@ -183,7 +213,7 @@ input[type=file]{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 
 <div class="card small">
 <b>PRIMERの扱い</b><br>
-通常インクはC/M/Y/Kの色マスで4行を確定し、罫線の位置を使わずにチェックマークを探します。v3.3では端末を自動判定し、iPhone / iPad系は傾き補正なし、Androidタブレット系のみ左ボトルを少し右肩下がり・右ボトルを少し右肩上がりとして探索します。解析画面と端末診断は残しています。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は900×1200へ正規化した後、左右のボトルを別々に拡大してチェック表を探します。
+通常インクはC/M/Y/Kの色マスで4行を確定し、罫線の位置を使わずにチェックマークを探します。v3.4では端末別の傾き補正と解析画面を残したまま、正解色を選んで結果・元画像・解析画像をGoogleスプレッドシートへ送信できます。<br>表が見つからない場合は、黄土色帯周辺を広めに切り出し、元画像・白黒強調・ラベル文字の複数情報をまとめてOCRします。「PR-200」だけでなく「Primer」も判定材料にします。<br>撮影ボタンを押すと映像を静止し、「撮影しました・判定中」を表示します。<br><br>画像は外部AIへ送信しません。OCRライブラリの読込にはネット接続が必要です。<br>撮影画像は900×1200へ正規化した後、左右のボトルを別々に拡大してチェック表を探します。
 </div>
 </div>
 <script src="app.js"></script>
