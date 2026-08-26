@@ -4,7 +4,7 @@ const $=id=>document.getElementById(id);
 const file=$("file"),video=$("video"),photo=$("photo");
 const pctx=photo.getContext("2d",{willReadFrequently:true});
 const normL=$("normL"),normR=$("normR"),bar=$("bar");
-const startCameraBtn=$("startCamera"),captureBtn=$("capture"),stopCameraBtn=$("stopCamera");
+const startCameraBtn=$("startCamera"),captureBtn=$("capture");
 let stream=null;
 
 function detectDeviceProfile(){
@@ -53,6 +53,9 @@ let tesseractPromise=null;
 let ocrWorkerPromise=null;
 const CANON_W=900, CANON_H=1200, CANON_ASPECT=CANON_W/CANON_H;
 const SIDE_SCALE=1.55;
+const APPS_SCRIPT_URL="https://script.google.com/macros/s/AKfycbx99T2sldzAqQk4QCOIyZQRGXVZ8ySzNz0l7MmMY6C5dZJNtHVAOIA8OEwNquTjNh0o6A/exec";
+const CORRECT_VALUES=new Set(["C","M","Y","K","W","CL","LC","LM","PRIMER"]);
+let LAST_ANALYSIS=null;
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function setProgress(v){bar.style.width=`${clamp(v,0,100)}%`}
@@ -126,16 +129,16 @@ async function startCamera(){
     $("captureState").classList.remove("on");
     $("retake").classList.remove("show");
     captureBtn.textContent="この状態で撮影・判定";
-    captureBtn.disabled=false;stopCameraBtn.disabled=false;
+    captureBtn.disabled=false;
     setStatus("左右に1本ずつ。枠は目安なので大体でOK","info");
   }catch(e){console.error(e);setStatus("カメラを起動できません："+e.message,"warn")}
 }
 function stopCamera(){
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
-  captureBtn.disabled=true;stopCameraBtn.disabled=true;
+  captureBtn.disabled=true;
   $("retake").classList.remove("show");
 }
-startCameraBtn.onclick=startCamera;stopCameraBtn.onclick=stopCamera;
+startCameraBtn.onclick=startCamera;
 
 
 function drawVisibleVideoToPhoto(){
@@ -1191,8 +1194,87 @@ async function ocrBandType(imgData,band,x0,x1){
   }
 }
 
+
+function setCorrectSelects(leftName,rightName){
+  const l=$("leftCorrect"),r=$("rightCorrect");
+  l.value=CORRECT_VALUES.has(leftName)?leftName:"";
+  r.value=CORRECT_VALUES.has(rightName)?rightName:"";
+  $("sendResult").disabled=false;
+  $("sendMessage").className="sendNote";
+  $("sendMessage").textContent="判定が正しければ、そのまま「結果を送信」でOKです。";
+}
+function analysisImageDataURL(){
+  const c=document.createElement("canvas");
+  c.width=1200;c.height=560;
+  const x=c.getContext("2d");
+  x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);
+  x.fillStyle="#111";x.font="bold 28px sans-serif";
+  x.fillText(`左  判定: ${$("left").textContent}`,24,38);
+  x.fillText(`右  判定: ${$("right").textContent}`,624,38);
+  x.drawImage(normL,0,60,600,500);
+  x.drawImage(normR,600,60,600,500);
+  return c.toDataURL("image/png");
+}
+function currentResultStatus(){
+  const t=$("status").textContent.trim();
+  return (t==="OK"||t==="ERROR")?t:"要確認";
+}
+async function sendResultToSheet(){
+  if(!LAST_ANALYSIS)return;
+  const lc=$("leftCorrect").value,rc=$("rightCorrect").value;
+  if(!CORRECT_VALUES.has(lc)||!CORRECT_VALUES.has(rc)){
+    $("sendMessage").className="sendNote sendError";
+    $("sendMessage").textContent="左・右の正解を選んでください。";
+    return;
+  }
+  const btn=$("sendResult"),msg=$("sendMessage");
+  btn.disabled=true;btn.textContent="送信中…";
+  msg.className="sendNote";msg.textContent="元画像と解析画像を送信しています…";
+
+  const predictedL=LAST_ANALYSIS.left||"";
+  const predictedR=LAST_ANALYSIS.right||"";
+  const confirmation=(predictedL===lc&&predictedR===rc)?"判定一致":"修正あり";
+
+  const payload={
+    device:DEVICE_PROFILE.kind,
+    leftResult:predictedL,
+    rightResult:predictedR,
+    leftCorrect:lc,
+    rightCorrect:rc,
+    result:LAST_ANALYSIS.status,
+    confirmation,
+    leftTilt:DEVICE_PROFILE.leftTilt,
+    rightTilt:DEVICE_PROFILE.rightTilt,
+    originalImage:photo.toDataURL("image/jpeg",0.72),
+    analysisImage:analysisImageDataURL()
+  };
+
+  try{
+    await fetch(APPS_SCRIPT_URL,{
+      method:"POST",
+      mode:"no-cors",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify(payload)
+    });
+    msg.className="sendNote sendDone";
+    msg.textContent="送信しました。スプレッドシートで確認できます。";
+    btn.textContent="送信済み";
+  }catch(e){
+    console.error(e);
+    msg.className="sendNote sendError";
+    msg.textContent="送信できませんでした。通信状態を確認してもう一度押してください。";
+    btn.textContent="結果を送信";
+    btn.disabled=false;
+  }
+}
+$("sendResult").onclick=sendResultToSheet;
+$("leftCorrect").onchange=()=>{if(LAST_ANALYSIS){$("sendResult").disabled=false;$("sendResult").textContent="結果を送信";}};
+$("rightCorrect").onchange=()=>{if(LAST_ANALYSIS){$("sendResult").disabled=false;$("sendResult").textContent="結果を送信";}};
+
 async function analyze(){
   $("left").textContent="-";$("right").textContent="-";$("leftScore").textContent="";$("rightScore").textContent="";
+  LAST_ANALYSIS=null;$("sendResult").disabled=true;$("sendResult").textContent="結果を送信";
+  $("sendMessage").className="sendNote";$("sendMessage").textContent="判定中です…";
   setProgress(5);setStatus("2本を確認しています…","info");await sleep(20);
 
   const img=pctx.getImageData(0,0,photo.width,photo.height);
@@ -1288,6 +1370,13 @@ async function analyze(){
   if(!rL.name||!rR.name)setStatus("要確認","warn");
   else if(rL.name===rR.name)setStatus("OK","ok");
   else setStatus("ERROR","ng");
+
+  LAST_ANALYSIS={
+    left:rL.name||"",
+    right:rR.name||"",
+    status:currentResultStatus()
+  };
+  setCorrectSelects(rL.name,rR.name);
 }
 
 updateDiag();
